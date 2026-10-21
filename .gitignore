@@ -1,0 +1,3 @@
+# PKI / certificates (private keys and generated certs)
+pki/
+mosquitto/certs/

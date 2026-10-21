@@ -1,0 +1,7 @@
+# Ogni in-out (CN del certificato = in_out_id) scrive solo sui propri topic
+pattern write baron/%u/data
+pattern write baron/%u/status
+
+# Il backend (certificato con CN=backend) legge tutto
+user backend
+topic read baron/#
