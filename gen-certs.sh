@@ -30,8 +30,8 @@ crlnumber        = $dir/crlnumber
 certificate      = $dir/ca.crt
 private_key      = $dir/ca.key
 default_md       = sha256
-default_days     = 825
-default_crl_days = 1825
+default_days     = 36500
+default_crl_days = 36500
 unique_subject   = no
 policy           = policy_cn
 
@@ -45,7 +45,7 @@ issue() {
   local NAME="$1" CN="$2" EXT="${3:-}"
   openssl genrsa -out "$NAME.key" 2048 2>/dev/null
   openssl req -new -key "$NAME.key" -subj "/CN=$CN" -out "$NAME.csr"
-  local ARGS=(-batch -config "$CNF" -in "$NAME.csr" -out "$NAME.crt" -notext -days 825)
+  local ARGS=(-batch -config "$CNF" -in "$NAME.csr" -out "$NAME.crt" -notext -enddate 99991231235959Z)
   if [ -n "$EXT" ]; then ARGS+=(-extfile "$EXT"); fi
   openssl ca "${ARGS[@]}"
   rm -f "$NAME.csr"
@@ -74,7 +74,7 @@ case "${1:-}" in
 
     # CA (ca.key va tenuta al sicuro, NON sul server)
     openssl genrsa -out ca.key 4096 2>/dev/null
-    openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
+    openssl req -x509 -new -nodes -key ca.key -sha256 -days 36500 \
       -subj "/CN=Baron-MQTT-CA" \
       -addext "basicConstraints=critical,CA:TRUE" \
       -addext "keyUsage=critical,keyCertSign,cRLSign" \
