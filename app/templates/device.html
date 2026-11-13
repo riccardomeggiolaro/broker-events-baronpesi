@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_macros.html" import state, event_badge, messages_table %}
+{% block title %}{{ device.name or device.id }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <a href="/devices" class="muted small">← Dispositivi</a>
+    <h1>{{ device.name or device.id }}</h1>
+    <div class="mono muted">{{ device.id }}</div>
+  </div>
+  <div data-presence="{{ device.id }}" data-channel="{{ device.channel_open }}" class="big-state">{{ state(online, device.channel_open) }}</div>
+</div>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>Connessione</h2>
+    <dl class="kv">
+      <dt>Broker</dt><dd class="mono">{{ broker_host }}:{{ broker_port }} (TLS)</dd>
+      <dt>Client ID / topic</dt><dd class="mono">{{ device.id }}</dd>
+      <dt>Autenticazione</dt><dd>certificato client (username e password vuoti)</dd>
+      <dt>Stato</dt><dd>{% if online %}collegato da {{ online.ip }} dalle {{ online.since|dt }}{% else %}non collegato · ultimo accesso {{ device.last_seen_at|ago }}{% endif %}</dd>
+      <dt>Messaggi ricevuti</dt><dd>{{ msg_count }} · <a href="/messages?device={{ device.id }}">vedi storico</a></dd>
+      <dt>Creato il</dt><dd>{{ device.created_at|dt }}</dd>
+    </dl>
+
+    <h3>Canale</h3>
+    {% if device.channel_open %}
+      <p class="muted small">Il canale è <b>aperto</b>: il dispositivo può pubblicare su <code>{{ device.id }}</code> e <code>{{ device.id }}/#</code>.</p>
+      <form method="post" action="/devices/{{ device.id }}/channel" data-confirm="Chiudere il canale? Il dispositivo viene scollegato e non potrà ricollegarsi finché non lo riapri (l'in-out terrà le pesate in coda).">
+        <input type="hidden" name="open" value="0"><button class="btn warn">Chiudi canale</button>
+      </form>
+    {% else %}
+      <p class="muted small">Il canale è <b>chiuso</b>: il certificato è sospeso e il broker rifiuta la connessione. L'in-out tiene le pesate in coda e le invia quando riapri il canale.</p>
+      <form method="post" action="/devices/{{ device.id }}/channel">
+        <input type="hidden" name="open" value="1"><button class="btn primary">Apri canale</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Dati</h2>
+    <form method="post" action="/devices/{{ device.id }}/edit" class="form">
+      <label>Nome<input name="name" value="{{ device.name }}"></label>
+      <label>Note<textarea name="notes" rows="3">{{ device.notes }}</textarea></label>
+      <button class="btn">Salva</button>
+    </form>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Certificati</h2></div>
+  <p class="muted small">Lo zip contiene <code>ca.crt</code>, <code>client.crt</code> e <code>client.key</code>: caricali nei tre campi della pagina broker dell'in-out.</p>
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>Seriale</th><th>Rilasciato</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
+    <tbody>
+    {% for c in certs %}
+      <tr>
+        <td class="mono small">{{ c.serial[:16] }}…</td>
+        <td class="nowrap">{{ c.issued_at|dt(false) }}</td>
+        <td class="nowrap">{{ c.not_after|dt(false) }}</td>
+        <td>{% if c.revoked_at %}<span class="badge closed">revocato</span> <span class="muted small">{{ c.revoked_at|dt(false) }} · {{ c.revoke_reason }}</span>
+            {% else %}<span class="badge on">valido</span>{% endif %}</td>
+        <td class="actions">
+          {% if not c.revoked_at %}
+            {% if c.has_key %}<a class="btn small primary" href="/devices/{{ device.id }}/certificates/{{ c.serial }}/bundle.zip">Scarica zip</a>{% endif %}
+            <form method="post" action="/devices/{{ device.id }}/certificates/{{ c.serial }}/revoke" data-confirm="Revocare questo certificato? Il dispositivo non potrà più collegarsi con esso."><button class="btn small danger">Revoca</button></form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">Nessun certificato.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <form method="post" action="/devices/{{ device.id }}/certificates" class="inline-form">
+    <label>Validità (giorni)<input name="days" type="number" min="1" max="10950" value="{{ default_days }}"></label>
+    <label class="check"><input type="checkbox" name="revoke_previous" value="1" checked> revoca i certificati precedenti</label>
+    <button class="btn">Rilascia nuovo certificato</button>
+  </form>
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><h2>Ultimi messaggi</h2><a class="btn small" href="/messages?device={{ device.id }}">Tutti</a></div>
+    {{ messages_table(messages, show_device=False) }}
+  </section>
+  <section class="card">
+    <h2>Eventi</h2>
+    <ul class="events">
+      {% for e in events %}
+        <li>{{ event_badge(e.kind) }} <span class="ev-detail">{{ e.detail }}</span> <span class="muted small nowrap">{{ e.ts|dt }}</span></li>
+      {% else %}<li class="empty">Nessun evento.</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+
+<section class="card danger-zone">
+  <h2>Elimina dispositivo</h2>
+  <p class="muted small">Revoca tutti i certificati e chiude il canale.</p>
+  <form method="post" action="/devices/{{ device.id }}/delete" class="inline-form" data-confirm="Eliminare definitivamente {{ device.id }}?">
+    <label class="check"><input type="checkbox" name="delete_messages" value="1"> elimina anche i {{ msg_count }} messaggi archiviati</label>
+    <button class="btn danger">Elimina</button>
+  </form>
+</section>
+{% endblock %}

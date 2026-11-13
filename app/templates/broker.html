@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Broker{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Broker</h1>
+  <form method="post" action="/broker/reload"><button class="btn small">Riscrivi ACL/CRL e ricarica</button></form>
+</div>
+
+<div class="grid-2">
+  <section class="card">
+    <h2>Connessione per gli in-out</h2>
+    <dl class="kv">
+      <dt>Host</dt><dd class="mono">{{ broker_host }}</dd>
+      <dt>Porta</dt><dd class="mono">{{ broker_port }} (MQTT su TLS 1.2+)</dd>
+      <dt>Autenticazione</dt><dd>solo certificato client firmato da questa CA</dd>
+      <dt>Topic</dt><dd>ogni dispositivo scrive solo su <code>&lt;ID&gt;</code> e <code>&lt;ID&gt;/#</code></dd>
+      <dt>Messaggio massimo</dt><dd>{{ max_message_mb }} MB</dd>
+      <dt>Stato</dt><dd>
+        <span class="pill {{ 'ok' if status.broker_running else 'bad' }}">broker {{ 'attivo' if status.broker_running else 'fermo' }}</span>
+        <span class="pill {{ 'ok' if status.ingest_connected else 'bad' }}">archivio {{ 'collegato' if status.ingest_connected else 'scollegato' }}</span>
+        {% if status.ingest_error %}<div class="muted small">{{ status.ingest_error }}</div>{% endif %}
+      </dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Autorità di certificazione</h2><a class="btn small" href="/ca.crt">Scarica ca.crt</a></div>
+    <dl class="kv">
+      <dt>CA</dt><dd>{{ ca.subject }}</dd>
+      <dt>Valida fino al</dt><dd>{{ ca.not_after|dt(false) }}</dd>
+      <dt>Impronta SHA-256</dt><dd class="mono tiny">{{ ca.fingerprint }}</dd>
+    </dl>
+    <h3>Certificato del server</h3>
+    <dl class="kv">
+      <dt>Nomi (SAN)</dt><dd class="mono">{{ server_names|join(', ') }}</dd>
+      <dt>Valido fino al</dt><dd>{{ server.not_after|dt(false) }}</dd>
+    </dl>
+    <p class="muted small">Il certificato del server viene rigenerato automaticamente all'avvio se cambia <code>BROKER_HOST</code> o se sta per scadere. La chiave della CA resta nel volume dati: fanne un backup.</p>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Certificati revocati</h2>
+  <div class="table-wrap">
+  <table class="table compact">
+    <thead><tr><th>Seriale</th><th>Dispositivo</th><th>Revocato</th><th>Motivo</th></tr></thead>
+    <tbody>
+    {% for r in revoked %}
+      <tr><td class="mono small">{{ r.serial[:16] }}…</td><td><a href="/devices/{{ r.device_id }}">{{ r.device_id }}</a></td><td class="nowrap">{{ r.revoked_at|dt }}</td><td>{{ r.revoke_reason }}</td></tr>
+    {% else %}<tr><td colspan="4" class="empty">Nessuno.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Log di Mosquitto</h2><a class="btn small ghost" href="/broker">Aggiorna</a></div>
+  <pre class="raw log" id="broker-log">{% for l in log %}{{ l }}
+{% endfor %}</pre>
+</section>
+{% endblock %}
+{% block scripts %}<script>const l=document.getElementById('broker-log'); if(l) l.scrollTop=l.scrollHeight;</script>{% endblock %}

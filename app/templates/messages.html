@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import messages_table %}
+{% block title %}Storico{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Storico messaggi</h1><span class="muted">{{ total }} messaggi · conservati {{ retention_days }} giorni</span></div>
+
+<form method="get" action="/messages" class="card filters">
+  <label>Dispositivo
+    <select name="device"><option value="">Tutti</option>
+      {% for d in devices %}<option {{ 'selected' if d == filters.device }}>{{ d }}</option>{% endfor %}
+    </select></label>
+  <label>Evento
+    <select name="event_type"><option value="">Tutti</option>
+      {% for t in types %}<option {{ 'selected' if t == filters.event_type }}>{{ t }}</option>{% endfor %}
+    </select></label>
+  <label>Dal<input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+  <label>Al<input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+  <label class="grow">Cerca<input name="q" value="{{ filters.q }}" placeholder="targa, cliente, message_id…"></label>
+  <div class="filter-actions"><button class="btn primary">Filtra</button><a class="btn ghost" href="/messages">Azzera</a></div>
+</form>
+
+<section class="card">
+  {{ messages_table(rows) }}
+  {% if pages > 1 %}
+  {% set qs = filters|dictsort|selectattr('1')|map('join', '=')|join('&') %}
+  <nav class="pager">
+    {% if page > 1 %}<a class="btn small" href="?{{ qs }}&page={{ page - 1 }}">← Precedenti</a>{% endif %}
+    <span class="muted">Pagina {{ page }} di {{ pages }}</span>
+    {% if page < pages %}<a class="btn small" href="?{{ qs }}&page={{ page + 1 }}">Successivi →</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}

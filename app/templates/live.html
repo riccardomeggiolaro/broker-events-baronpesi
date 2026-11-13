@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Live{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Monitor live</h1>
+  <div class="live-ctrl">
+    <span class="pill" id="ws-state">connessione…</span>
+    <select id="flt-device"><option value="">Tutti i dispositivi</option>
+      {% for d in devices %}<option value="{{ d.id }}">{{ d.name or d.id }}</option>{% endfor %}
+    </select>
+    <label class="check"><input type="checkbox" id="show-presence" checked> connessioni</label>
+    <button class="btn small" id="btn-pause">Pausa</button>
+    <button class="btn small ghost" id="btn-clear">Svuota</button>
+  </div>
+</div>
+
+<div class="grid-2 wide-left">
+  <section class="card">
+    <h2>Flusso</h2>
+    <div class="table-wrap">
+    <table class="table" id="live-table">
+      <thead><tr><th>Ora</th><th>Dispositivo</th><th>Tipo</th><th>Dettaglio</th><th class="num">Dim.</th></tr></thead>
+      <tbody><tr class="placeholder"><td colspan="5" class="empty">In attesa di messaggi…</td></tr></tbody>
+    </table>
+    </div>
+  </section>
+  <section class="card">
+    <h2>Collegati ora</h2>
+    <ul class="online-list" id="online-list"><li class="empty">—</li></ul>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  window.DEVICE_NAMES = {{ names|tojson }};
+  startLive();
+</script>
+{% endblock %}

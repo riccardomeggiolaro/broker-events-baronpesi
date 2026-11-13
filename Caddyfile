@@ -1,0 +1,12 @@
+# HTTPS automatico (Let's Encrypt) per il pannello sul dominio del broker.
+# Il DNS di BROKER_HOST deve puntare a questo server e le porte 80/443 devono essere aperte.
+{$BROKER_HOST} {
+	encode gzip
+	reverse_proxy broker:8080
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "same-origin"
+	}
+}

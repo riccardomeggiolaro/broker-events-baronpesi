@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Messaggio {{ m.id }}{% endblock %}
+
+{% macro value(v) -%}
+  {%- if v is mapping -%}
+    <table class="nested">{% for k, x in v.items() %}<tr><th>{{ k }}</th><td>{{ value(x) }}</td></tr>{% endfor %}</table>
+  {%- elif v is iterable and v is not string -%}
+    {% if v|length == 0 %}<span class="muted">[]</span>{% else %}<ol class="nested-list">{% for x in v %}<li>{{ value(x) }}</li>{% endfor %}</ol>{% endif %}
+  {%- elif v is none -%}<span class="muted">—</span>
+  {%- elif v is sameas true -%}sì{%- elif v is sameas false -%}no
+  {%- else -%}{{ v }}{%- endif -%}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <a href="/messages" class="muted small">← Storico</a>
+    <h1>{{ m.event_type or 'Messaggio' }} · {{ m.weigher_name or m.topic }}</h1>
+    <div class="muted">{{ m.received_at|dt }} da <a href="/devices/{{ m.device_id }}">{{ m.device_name or m.device_id }}</a> · {{ m.size|size }}</div>
+  </div>
+  <form method="post" action="/messages/{{ m.id }}/delete" data-confirm="Eliminare questo messaggio e i suoi allegati?"><button class="btn small danger">Elimina</button></form>
+</div>
+
+<div class="grid-2 wide-left">
+  <section class="card">
+    <h2>Pesata</h2>
+    {% if weighing is not none %}
+      {{ value(weighing) }}
+    {% elif body is not none %}
+      {{ value(body) }}
+    {% else %}
+      <pre class="raw">{{ pretty or '(contenuto binario salvato come allegato)' }}</pre>
+    {% endif %}
+  </section>
+  <section class="card">
+    <h2>Intestazione</h2>
+    <dl class="kv">
+      <dt>Topic</dt><dd class="mono">{{ m.topic }}</dd>
+      {% if m.message_id %}<dt>message_id</dt><dd class="mono small">{{ m.message_id }}</dd>{% endif %}
+      {% for k, v in header.items() if k != 'message_id' %}<dt>{{ k }}</dt><dd>{{ value(v) }}</dd>{% endfor %}
+    </dl>
+  </section>
+</div>
+
+{% if atts %}
+<section class="card">
+  <h2>Allegati</h2>
+  <div class="gallery">
+    {% for a in atts if a.kind == 'image' %}
+      <a href="/attachments/{{ a.id }}" target="_blank" class="thumb"><img src="/attachments/{{ a.id }}" alt="{{ a.name }}" loading="lazy"><span>{{ a.name }}</span></a>
+    {% endfor %}
+  </div>
+  {% for a in atts if a.kind == 'pdf' %}
+    <div class="att-head"><b>{{ a.name }}</b> <span class="muted small">{{ a.size|size }}</span>
+      <a class="btn small" href="/attachments/{{ a.id }}" target="_blank">Apri</a>
+      <a class="btn small ghost" href="/attachments/{{ a.id }}?download=1">Scarica</a></div>
+    <iframe class="pdf" src="/attachments/{{ a.id }}" title="{{ a.name }}"></iframe>
+  {% endfor %}
+  {% for a in atts if a.kind not in ('image', 'pdf') %}
+    <div class="att-head"><b>{{ a.name }}</b> <span class="muted small">{{ a.size|size }}</span>
+      <a class="btn small ghost" href="/attachments/{{ a.id }}?download=1">Scarica</a></div>
+    {% if csv_preview.get(a.id) %}
+      <div class="table-wrap"><table class="table compact">
+        {% for row in csv_preview[a.id] %}{% set cell = 'th' if loop.first else 'td' %}<tr>{% for c in row %}<{{ cell }}>{{ c }}</{{ cell }}>{% endfor %}</tr>{% endfor %}
+      </table></div>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endif %}
+
+<details class="card">
+  <summary>JSON ricevuto (senza il contenuto base64 degli allegati)</summary>
+  <pre class="raw">{{ pretty }}</pre>
+</details>
+{% endblock %}

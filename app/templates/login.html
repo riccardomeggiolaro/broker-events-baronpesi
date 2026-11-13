@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Accesso{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block content %}
+<form method="post" action="/login" class="card login">
+  <h1><span class="dot"></span> Broker MQTT</h1>
+  <p class="muted">Pannello di gestione di {{ broker_host }}</p>
+  {% if not configured %}
+    <div class="flash error">ADMIN_PASSWORD non impostata: imposta la variabile nel file <code>.env</code> e riavvia il container.</div>
+  {% endif %}
+  <label>Utente<input name="username" autocomplete="username" required autofocus></label>
+  <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="btn primary">Accedi</button>
+</form>
+{% endblock %}
