@@ -8,7 +8,7 @@
     {% if v|length == 0 %}<span class="muted">[]</span>{% else %}<ol class="nested-list">{% for x in v %}<li>{{ value(x) }}</li>{% endfor %}</ol>{% endif %}
   {%- elif v is none -%}<span class="muted">—</span>
   {%- elif v is sameas true -%}sì{%- elif v is sameas false -%}no
-  {%- else -%}{{ v }}{%- endif -%}
+  {%- else -%}<span class="clamp">{{ v }}</span>{%- endif -%}
 {%- endmacro %}
 
 {% block content %}
