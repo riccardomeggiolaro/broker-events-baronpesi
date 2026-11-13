@@ -136,3 +136,52 @@ function startLive() {
   }
   connect();
 }
+
+// Valori troncati a 3 righe: popup con il testo completo al passaggio del mouse (o al tocco)
+(function () {
+  const items = document.querySelectorAll(".clamp");
+  if (!items.length) return;
+  const mark = () => items.forEach((el) => el.classList.toggle("is-clamped", el.scrollHeight > el.clientHeight + 1));
+  mark();
+  window.addEventListener("resize", mark);
+
+  const pop = document.createElement("div");
+  pop.className = "clamp-pop";
+  pop.hidden = true;
+  pop.innerHTML = '<div class="pop-text"></div><div class="pop-actions"><button type="button">Copia</button></div>';
+  document.body.appendChild(pop);
+  const text = pop.querySelector(".pop-text");
+  const copyBtn = pop.querySelector("button");
+  let current = null, hideTimer = null;
+
+  function show(el) {
+    clearTimeout(hideTimer);
+    current = el;
+    text.textContent = el.textContent;
+    copyBtn.textContent = "Copia";
+    pop.hidden = false;
+    const r = el.getBoundingClientRect(), p = pop.getBoundingClientRect();
+    let top = r.bottom + 6;
+    if (top + p.height > window.innerHeight - 8) top = Math.max(8, r.top - p.height - 6);
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - p.width - 8);
+    pop.style.top = `${top}px`;
+    pop.style.left = `${left}px`;
+  }
+  const hideSoon = () => { hideTimer = setTimeout(() => { pop.hidden = true; current = null; }, 200); };
+
+  items.forEach((el) => {
+    el.addEventListener("mouseenter", () => el.classList.contains("is-clamped") && show(el));
+    el.addEventListener("mouseleave", hideSoon);
+    el.addEventListener("click", () => {
+      if (!el.classList.contains("is-clamped")) return;
+      if (current === el && !pop.hidden) { pop.hidden = true; current = null; } else show(el);
+    });
+  });
+  pop.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+  pop.addEventListener("mouseleave", hideSoon);
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard?.writeText(text.textContent).then(() => { copyBtn.textContent = "Copiato"; }).catch(() => {});
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") pop.hidden = true; });
+  window.addEventListener("scroll", () => { pop.hidden = true; }, { passive: true });
+})();
