@@ -3,7 +3,8 @@
 {% block main_class %}login-wrap{% endblock %}
 {% block content %}
 <form method="post" action="/login" class="card login">
-  <h1><span class="dot"></span> Broker MQTT</h1>
+  <img class="login-logo" src="/static/logo.png" alt="Baron Pesi">
+  <h1>Broker MQTT</h1>
   <p class="muted">Pannello di gestione di {{ broker_host }}</p>
   {% if not configured %}
     <div class="flash error">ADMIN_PASSWORD non impostata: imposta la variabile nel file <code>.env</code> e riavvia il container.</div>
