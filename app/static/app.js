@@ -1,3 +1,10 @@
+// Tema chiaro/scuro: il pulsante alterna e salva la scelta
+document.querySelectorAll("[data-theme-toggle]").forEach((btn) => btn.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) {}
+}));
+
 // Righe cliccabili e conferme sui form distruttivi
 document.addEventListener("click", (e) => {
   const row = e.target.closest("tr[data-href]");
