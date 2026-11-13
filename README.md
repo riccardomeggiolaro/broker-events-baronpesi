@@ -36,6 +36,22 @@ Al primo avvio vengono creati automaticamente la CA, il certificato del server (
 
 > Se hai già un reverse proxy, togli il servizio `caddy` dal compose e pubblica la porta 8080 del servizio `broker` solo verso il proxy. Senza HTTPS imposta `SESSION_HTTPS_ONLY=0`.
 
+## Avvio in rete locale (senza dominio)
+
+Per un PC/server Linux nella stessa LAN degli in-out: niente Caddy, pannello in HTTP sulla porta 8080, `BROKER_HOST` = IP del PC (deve essere fisso).
+
+```bash
+cp .env.example .env
+```
+
+Nel `.env`: `BROKER_HOST=192.168.1.50` (l'IP del PC), `ADMIN_PASSWORD=...`, `SESSION_HTTPS_ONLY=0`.
+
+```bash
+docker compose -f docker-compose.lan.yml up -d --build
+```
+
+Pannello: `http://192.168.1.50:8080`. Negli in-out: host `192.168.1.50`, porta `8883`.
+
 ## Collegare un in-out
 
 1. Sull'in-out apri la configurazione del broker e copia il **Client ID / topic** (es. `in-out-impianto-1a2b3c4d`).

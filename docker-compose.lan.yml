@@ -1,0 +1,22 @@
+# Installazione in rete locale (senza dominio e senza Caddy).
+#   cp .env.example .env   (BROKER_HOST = IP del PC, SESSION_HTTPS_ONLY=0)
+#   docker compose -f docker-compose.lan.yml up -d --build
+# Pannello: http://<IP>:8080   MQTT/TLS per gli in-out: <IP>:8883
+services:
+  broker:
+    build: .
+    image: broker-events-baronpesi:latest
+    container_name: mqtt-broker
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${BROKER_PUBLIC_PORT:-8883}:8883"
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - broker_data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  broker_data:
