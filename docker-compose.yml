@@ -1,16 +1,40 @@
+# Broker MQTT per gli in-out + pannello di gestione.
+#   cp .env.example .env   (imposta BROKER_HOST e ADMIN_PASSWORD)
+#   docker compose up -d --build
 services:
-  mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: mosquitto
+  broker:
+    build: .
+    image: broker-events-baronpesi:latest
+    container_name: mqtt-broker
     restart: unless-stopped
+    env_file: .env
     ports:
-      - "8883:8883"
+      - "${BROKER_PUBLIC_PORT:-8883}:8883"   # MQTT su TLS, raggiungibile dagli in-out
+    expose:
+      - "8080"                               # pannello: pubblicato solo tramite Caddy
     volumes:
-      - ./mosquitto/config:/mosquitto/config:ro
-      - ./mosquitto/certs:/mosquitto/certs:ro
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
+      - broker_data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    image: caddy:2
+    container_name: mqtt-broker-caddy
+    restart: unless-stopped
+    environment:
+      BROKER_HOST: ${BROKER_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - broker
 
 volumes:
-  mosquitto_data:
-  mosquitto_log:
+  broker_data:
+  caddy_data:
+  caddy_config:

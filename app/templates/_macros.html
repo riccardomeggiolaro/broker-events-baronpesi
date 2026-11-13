@@ -1,0 +1,33 @@
+{% macro state(online, channel_open=1) -%}
+  {%- if not channel_open -%}<span class="badge closed">canale chiuso</span>
+  {%- elif online -%}<span class="badge on">online</span>
+  {%- else -%}<span class="badge off">offline</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro event_badge(kind) -%}
+  <span class="ev ev-{{ kind }}">{{ {'connect': 'connesso', 'disconnect': 'disconnesso', 'denied': 'rifiutato', 'admin': 'admin'}.get(kind, kind) }}</span>
+{%- endmacro %}
+
+{% macro messages_table(rows, show_device=True) %}
+<div class="table-wrap">
+<table class="table">
+  <thead><tr>
+    <th>Ricevuto</th>{% if show_device %}<th>Dispositivo</th>{% endif %}<th>Evento</th><th>Pesa</th><th class="num">Allegati</th><th class="num">Dimensione</th>
+  </tr></thead>
+  <tbody>
+  {% for m in rows %}
+    <tr class="clickable" data-href="/messages/{{ m.id }}">
+      <td class="nowrap"><a href="/messages/{{ m.id }}">{{ m.received_at|dt }}</a></td>
+      {% if show_device %}<td>{{ m.device_name or m.device_id }}{% if m.device_name %}<div class="muted small mono">{{ m.device_id }}</div>{% endif %}</td>{% endif %}
+      <td>{{ m.event_type or '—' }}</td>
+      <td>{{ m.weigher_name or '—' }}{% if m.instance_name %}<div class="muted small">{{ m.instance_name }}</div>{% endif %}</td>
+      <td class="num">{{ m.n_files }}</td>
+      <td class="num nowrap">{{ m.size|size }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="empty">Nessun messaggio.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}

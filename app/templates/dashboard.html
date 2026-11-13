@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import state, event_badge, messages_table %}
+{% block title %}Panoramica{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Panoramica</h1>
+  <div class="health">
+    <span class="pill {{ 'ok' if status.broker_running else 'bad' }}">Broker {{ 'attivo' if status.broker_running else 'fermo' }}</span>
+    <span class="pill {{ 'ok' if status.ingest_connected else 'bad' }}" title="{{ status.ingest_error or '' }}">Archivio {{ 'collegato' if status.ingest_connected else 'scollegato' }}</span>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="label">Dispositivi online</div><div class="value" id="st-online">{{ status.devices_online }}<span class="of">/ {{ status.devices }}</span></div></div>
+  <div class="stat"><div class="label">Messaggi ultime 24 h</div><div class="value">{{ status.messages_24h }}</div></div>
+  <div class="stat"><div class="label">Messaggi in archivio</div><div class="value">{{ status.messages_total }}</div></div>
+  <div class="stat"><div class="label">Spazio usato</div><div class="value">{{ status.storage|size }}</div><div class="hint">conservazione {{ retention_days }} giorni</div></div>
+</div>
+
+{% if status.unknown_online %}
+<div class="flash warn">
+  Client collegati ma non registrati come dispositivi:
+  {% for u in status.unknown_online %}<code>{{ u.id }}</code> ({{ u.ip }}){% if not loop.last %}, {% endif %}{% endfor %}.
+  Hanno un certificato valido della CA ma nessun canale aperto, quindi non possono pubblicare.
+</div>
+{% endif %}
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><h2>Dispositivi</h2><a class="btn small" href="/devices">Gestisci</a></div>
+    <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Dispositivo</th><th>Stato</th><th>Ultimo messaggio</th></tr></thead>
+      <tbody>
+      {% for d in devices %}
+        <tr class="clickable" data-href="/devices/{{ d.id }}">
+          <td><a href="/devices/{{ d.id }}">{{ d.name or d.id }}</a>{% if d.name %}<div class="muted small mono">{{ d.id }}</div>{% endif %}</td>
+          <td data-presence="{{ d.id }}" data-channel="{{ d.channel_open }}">{{ state(d.online, d.channel_open) }}</td>
+          <td class="nowrap">{{ d.last_msg_at|ago }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="3" class="empty">Nessun dispositivo. <a href="/devices">Aggiungi il primo</a>.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Eventi recenti</h2></div>
+    <ul class="events">
+      {% for e in events %}
+        <li>{{ event_badge(e.kind) }}
+          <span class="ev-dev">{% if e.device_id %}<a href="/devices/{{ e.device_id }}">{{ e.device_name or e.device_id }}</a>{% endif %}</span>
+          <span class="ev-detail">{{ e.detail }}</span>
+          <span class="muted small nowrap">{{ e.ts|dt }}</span></li>
+      {% else %}
+        <li class="empty">Nessun evento.</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Ultimi messaggi</h2><a class="btn small" href="/messages">Storico completo</a></div>
+  {{ messages_table(recent) }}
+</section>
+{% endblock %}

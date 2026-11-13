@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import state %}
+{% block title %}Dispositivi{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Dispositivi</h1></div>
+
+<div class="grid-2 wide-left">
+<section class="card">
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>Dispositivo</th><th>Stato</th><th>Ultimo accesso</th><th class="num">Messaggi</th><th>Certificato fino al</th></tr></thead>
+    <tbody>
+    {% for d in devices %}
+      <tr class="clickable" data-href="/devices/{{ d.id }}">
+        <td><a href="/devices/{{ d.id }}">{{ d.name or d.id }}</a><div class="muted small mono">{{ d.id }}</div></td>
+        <td data-presence="{{ d.id }}" data-channel="{{ d.channel_open }}">{{ state(d.online, d.channel_open) }}</td>
+        <td class="nowrap">{{ d.online_since|ago if d.online else d.last_seen_at|ago }}</td>
+        <td class="num">{{ d.msg_count }}</td>
+        <td class="nowrap">{% if d.cert_until %}{{ d.cert_until|dt(false) }}{% else %}<span class="badge closed">nessuno valido</span>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">Nessun dispositivo registrato.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Nuovo dispositivo</h2>
+  <p class="muted small">Viene rilasciato un certificato client firmato dalla CA del broker e aperto il canale:
+    il dispositivo potrà pubblicare solo sul topic uguale al suo ID.</p>
+  <form method="post" action="/devices" class="form">
+    <label>ID dispositivo (client ID dell'in-out)
+      <input name="device_id" value="{{ prefill }}" required pattern="[A-Za-z0-9][A-Za-z0-9._\-]{1,63}" class="mono"
+             placeholder="in-out-impianto-1a2b3c4d">
+      <span class="hint">Copialo dal campo <b>Client ID / topic</b> nella pagina broker dell'in-out.</span>
+    </label>
+    <label>Nome<input name="name" placeholder="Es. Pesa cava Nord"></label>
+    <label>Note<textarea name="notes" rows="2"></textarea></label>
+    <label>Validità certificato (giorni)<input name="days" type="number" min="1" max="10950" value="{{ default_days }}"></label>
+    <button class="btn primary">Crea e rilascia certificato</button>
+  </form>
+</section>
+</div>
+{% endblock %}

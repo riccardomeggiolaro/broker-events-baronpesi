@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Broker{% endblock %} · Baron Pesi MQTT</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%232f6fdf'/></svg>">
+</head>
+<body>
+{% if request.session.get('user') %}
+<header class="topbar">
+  <a class="brand" href="/"><span class="dot"></span>Broker MQTT</a>
+  <nav>
+    <a href="/" class="{{ 'active' if nav == 'dashboard' }}">Panoramica</a>
+    <a href="/devices" class="{{ 'active' if nav in ('devices', 'device') }}">Dispositivi</a>
+    <a href="/live" class="{{ 'active' if nav == 'live' }}">Live</a>
+    <a href="/messages" class="{{ 'active' if nav in ('messages', 'message') }}">Storico</a>
+    <a href="/broker" class="{{ 'active' if nav == 'broker' }}">Broker</a>
+  </nav>
+  <form method="post" action="/logout" class="logout"><button class="btn ghost small">Esci</button></form>
+</header>
+{% endif %}
+<main class="{% block main_class %}container{% endblock %}">
+  {% if flash %}<div class="flash {{ flash.kind }}">{{ flash.text }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
