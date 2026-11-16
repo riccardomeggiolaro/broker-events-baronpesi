@@ -1,5 +1,6 @@
 """Pannello web del broker: dispositivi, certificati, canali, monitor live e storico."""
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -151,6 +152,11 @@ templates.env.filters["dt"] = fmt_dt
 templates.env.filters["ago"] = fmt_ago
 templates.env.filters["size"] = fmt_size
 templates.env.globals["broker_host"] = config.BROKER_HOST
+# Versione dei file statici negli URL (?v=...): dopo un aggiornamento il browser scarica
+# subito i file nuovi invece di continuare a usare la copia in cache.
+templates.env.globals["static_v"] = hashlib.sha256(
+    b"".join(f.read_bytes() for f in sorted((BASE / "static").glob("*")) if f.is_file())
+).hexdigest()[:10]
 templates.env.globals["broker_port"] = config.BROKER_PUBLIC_PORT
 templates.env.globals["retention_days"] = config.RETENTION_DAYS
 templates.env.globals["max_message_mb"] = config.MAX_MESSAGE_MB

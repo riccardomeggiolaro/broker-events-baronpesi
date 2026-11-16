@@ -66,20 +66,28 @@ function startAutoRefresh() {
   }
   const schedule = () => { if (!timer) timer = setTimeout(() => { timer = null; refresh(); }, 400); };
 
-  function setState(ok) {
+  let wsOpen = false;
+  function setState(st) {
     if (!indicator) return;
     indicator.hidden = false;
-    indicator.className = `live-state ${ok ? "ok" : "bad"}`;
-    indicator.title = ok ? "Aggiornamento in tempo reale attivo" : "Aggiornamento in tempo reale interrotto, riprovo…";
+    indicator.className = `live-state ${st}`;
+    indicator.title = { ok: "Aggiornamento in tempo reale attivo", wait: "Collegamento in corso…" }[st]
+      || "Collegamento in tempo reale non disponibile: la pagina si aggiorna ogni 5 secondi";
   }
+  setState("wait");
 
   function connect() {
-    const ws = new WebSocket(wsUrl());
-    ws.onopen = () => setState(true);
+    let ws;
+    try { ws = new WebSocket(wsUrl()); } catch (e) { setTimeout(connect, 5000); return; }
+    // Un proxy che non completa l'apertura lascerebbe il websocket "in collegamento" per sempre
+    const openTimer = setTimeout(() => ws.close(), 10000);
+    ws.onopen = () => { clearTimeout(openTimer); wsOpen = true; setState("ok"); };
     ws.onclose = (e) => {
-      setState(false);
+      clearTimeout(openTimer);
+      wsOpen = false;
+      setState("bad");
       if (e.code === 4401) { location.href = "/login"; return; }
-      setTimeout(connect, 2000);
+      setTimeout(connect, 3000);
     };
     ws.onmessage = (m) => {
       const ev = JSON.parse(m.data);
@@ -92,8 +100,13 @@ function startAutoRefresh() {
     };
   }
   connect();
-  // Tempi relativi ("3 min fa") e stato del broker restano aggiornati anche senza eventi
-  setInterval(() => { if (!document.hidden) schedule(); }, 30000);
+  // Senza websocket (proxy che non lo inoltra) la pagina si aggiorna comunque ogni 5 secondi;
+  // con il websocket attivo ogni 30 secondi, per i tempi relativi ("3 min fa") e lo stato del broker.
+  let ticks = 0;
+  setInterval(() => {
+    ticks++;
+    if (!document.hidden && (!wsOpen || ticks % 6 === 0)) schedule();
+  }, 5000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(); });
 }
 if (!location.pathname.startsWith("/live")) startAutoRefresh();
@@ -177,8 +190,10 @@ function startLive() {
 
   function connect() {
     const ws = new WebSocket(wsUrl());
-    ws.onopen = () => { state.textContent = "in ascolto"; state.className = "pill ok"; };
+    const openTimer = setTimeout(() => ws.close(), 10000);
+    ws.onopen = () => { clearTimeout(openTimer); state.textContent = "in ascolto"; state.className = "pill ok"; };
     ws.onclose = (e) => {
+      clearTimeout(openTimer);
       state.textContent = "disconnesso, riprovo…"; state.className = "pill bad";
       if (e.code === 4401) { location.href = "/login"; return; }
       setTimeout(connect, 2000);
