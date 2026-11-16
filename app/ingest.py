@@ -98,8 +98,8 @@ class Ingest:
 
     # ------------------------------------------------------------------
     def store(self, topic: str, payload: bytes) -> dict | None:
-        # I comandi verso gli in-out (<id>/control) non sono pesate
-        if topic.endswith("/" + config.CONTROL_SUFFIX):
+        # I comandi verso gli in-out (<id>/control) e il tunnel dell'accesso remoto non sono pesate
+        if topic.endswith("/" + config.CONTROL_SUFFIX) or config.is_tunnel_topic(topic):
             return None
         device_id = topic.split("/")[0]
         received_at = db.now()

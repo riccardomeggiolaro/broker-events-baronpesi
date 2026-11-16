@@ -10,6 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -316,6 +317,17 @@ def api_status():
 # ----------------------------------------------------------------------
 # Dispositivi e certificati
 # ----------------------------------------------------------------------
+def _remote_url(request: Request, device_id: str) -> str | None:
+    """Indirizzo dell'accesso remoto all'in-out: stesso host del pannello, porta dedicata."""
+    if not config.REMOTE_ENABLED:
+        return None
+    host = request.url.hostname or config.BROKER_HOST
+    if ":" in host:
+        host = f"[{host}]"
+    scheme = "https" if request.url.scheme == "https" else "http"
+    return f"{scheme}://{host}:{config.REMOTE_PUBLIC_PORT}/__remote/open/{quote(device_id, safe='')}"
+
+
 def _get_device(device_id: str) -> dict:
     row = db.q1("SELECT * FROM devices WHERE id=?", device_id)
     if not row:
@@ -345,7 +357,7 @@ def device_page(request: Request, device_id: str):
     count = db.q1("SELECT COUNT(*) AS n FROM messages WHERE device_id=?", device_id)["n"]
     return render(
         request, "device.html", device=device, online=online, certs=certs, events=events,
-        messages=messages, msg_count=count,
+        messages=messages, msg_count=count, remote_url=_remote_url(request, device_id),
     )
 
 
