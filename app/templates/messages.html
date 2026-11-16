@@ -6,11 +6,11 @@
 
 <form method="get" action="/messages" class="card filters">
   <label>Dispositivo
-    <select name="device"><option value="">Tutti</option>
+    <select name="device" data-live="flt-device"><option value="">Tutti</option>
       {% for d in devices %}<option {{ 'selected' if d == filters.device }}>{{ d }}</option>{% endfor %}
     </select></label>
   <label>Evento
-    <select name="event_type"><option value="">Tutti</option>
+    <select name="event_type" data-live="flt-type"><option value="">Tutti</option>
       {% for t in types %}<option {{ 'selected' if t == filters.event_type }}>{{ t }}</option>{% endfor %}
     </select></label>
   <label>Dal<input type="date" name="date_from" value="{{ filters.date_from }}"></label>

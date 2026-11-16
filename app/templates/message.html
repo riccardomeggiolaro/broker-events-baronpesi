@@ -12,7 +12,7 @@
 {%- endmacro %}
 
 {% block content %}
-<div class="page-head">
+<div class="page-head" data-live="message-head">
   <div>
     <a href="/messages" class="muted small">← Storico</a>
     <h1>{{ m.event_type or 'Messaggio' }} · {{ m.weigher_name or m.topic }}</h1>
