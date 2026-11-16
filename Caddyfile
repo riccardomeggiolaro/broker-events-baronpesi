@@ -14,6 +14,7 @@
 # Accesso remoto all'in-out: stesso dominio e certificato, porta dedicata (REMOTE_PUBLIC_PORT).
 # Il login è quello del pannello; le richieste arrivano all'in-out attraverso il broker MQTT.
 {$BROKER_HOST}:8443 {
+	encode gzip
 	reverse_proxy broker:8081
 	header {
 		Strict-Transport-Security "max-age=31536000"

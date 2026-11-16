@@ -98,13 +98,18 @@ L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scri
 Nella pagina del dispositivo, **Apri l'in-out da remoto** apre in una nuova scheda l'interfaccia web dell'in-out, come se fossi in rete locale: pagine, chiamate alle API REST e websocket (pesi in tempo reale, log…). Non serve aprire porte verso l'impianto: tutto passa nella connessione MQTT/TLS che l'in-out tiene già aperta.
 
 ```
-browser ──▶ https://BROKER_HOST:8443/... ──▶ proxy remoto ──MQTT <ID>/tunnel/req──▶ in-out ──▶ http://127.0.0.1:<porta API>
-        ◀──────────────────────────────────────────────────MQTT <ID>/tunnel/res◀──
+browser ──▶ https://BROKER_HOST:8443/<ID>/... ──▶ proxy remoto ──MQTT <ID>/tunnel/req──▶ in-out ──▶ http://127.0.0.1:<porta API>/...
+        ◀───────────────────────────────────────────────────────MQTT <ID>/tunnel/res◀──
 ```
 
-- **Porta dedicata** (`REMOTE_PUBLIC_PORT`, default `8443`): l'interfaccia dell'in-out usa percorsi assoluti (`/api`, `/static`, websocket su `location.host`), quindi deve rispondere dalla radice `/`. Con Caddy è in HTTPS con lo stesso certificato del pannello; in LAN è in HTTP.
+- **Un indirizzo per ogni in-out**: `https://BROKER_HOST:8443/<ID>/` (in LAN `http://IP:8443/<ID>/`). Si possono tenere aperti più in-out insieme, in schede diverse dello stesso browser, ognuno con il suo login.
+- **Porta dedicata** (`REMOTE_PUBLIC_PORT`, default `8443`): con Caddy è in HTTPS con lo stesso certificato del pannello; in LAN è in HTTP.
 - **Accesso**: serve il login del pannello (lo stesso cookie di sessione, verificato anche sulla 8443). Poi l'in-out chiede il suo login come sempre.
-- **Un in-out alla volta per browser**: l'in-out scelto è salvato in un cookie; aprendone un altro, le schede già aperte passano al nuovo.
+- L'interfaccia dell'in-out usa percorsi assoluti (`/api`, `/static`, `/login`…). Il proxy la adatta al prefisso `/<ID>` senza modificare l'in-out:
+  - nelle pagine HTML inietta `app/static/remote-shim.js`, che aggiunge il prefisso a `fetch`, XHR, WebSocket, EventSource, `window.open` e `history`, e tiene separato il `localStorage` di ogni in-out (chiavi `/<ID>:token`…);
+  - nelle pagine e negli script riscrive le letture di `location.pathname` nel percorso senza prefisso, così i controlli tipo `=== '/reservation'` funzionano;
+  - le richieste senza prefisso (link, immagini, `location.href = '/login'`) vengono reindirizzate all'in-out della pagina che le ha fatte (dal `Referer`);
+  - i redirect e i cookie dell'in-out ricevono il prefisso.
 - I cookie del pannello non vengono mai inoltrati all'in-out. Ogni apertura è registrata negli eventi del dispositivo.
 - Limiti: richieste e risposte fino a 32 MB (e comunque entro `MAX_MESSAGE_MB`), attesa massima `REMOTE_TIMEOUT` secondi. Le risposte in streaming (download progressivi, SSE) arrivano solo quando sono complete.
 - Serve l'in-out aggiornato alla versione con l'accesso remoto (modulo `remote_tunnel`). Sull'in-out si può disattivare con `app_api.message_broker.remote_access = false` in `config.json`.
@@ -167,7 +172,7 @@ app/
   broker.py    mosquitto.conf, ACL, ricarica, scollegamento, lettura del log (stato online)
   ingest.py    subscriber MQTT interno che archivia i messaggi, pulizia dello storico
   enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)
-  remote.py    accesso remoto all'in-out: proxy HTTP/websocket sulla porta 8081 (8443 tramite Caddy)
+  remote.py    accesso remoto agli in-out su /<ID>/: proxy HTTP/websocket sulla porta 8081 (8443 tramite Caddy)
   tunnel.py    protocollo del tunnel su MQTT (<ID>/tunnel/req e <ID>/tunnel/res)
   db.py        schema SQLite
 docker/        entrypoint e supervisord (Mosquitto, pannello e registrazione nello stesso container)
