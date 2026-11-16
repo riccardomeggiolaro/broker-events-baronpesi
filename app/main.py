@@ -13,7 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -47,6 +47,32 @@ class Hub:
 
 
 hub = Hub()
+
+
+# Impronta dei dati mostrati nel pannello: cambia a ogni modifica, anche se fatta da un altro
+# processo (registrazione automatica sulla 8884) o da un altro amministratore.
+FINGERPRINT_SQL = """
+SELECT (SELECT COALESCE(MAX(id), 0) FROM events) AS ev,
+       (SELECT COALESCE(MAX(id), 0) || ':' || COUNT(*) FROM messages) AS msg,
+       (SELECT COUNT(*) || ':' || COUNT(revoked_at) FROM certificates) AS crt,
+       (SELECT COALESCE(group_concat(id || '|' || channel_open || '|' || COALESCE(name, '') || '|'
+                 || COALESCE(notes, '') || '|' || COALESCE(renew_requested_at, ''), char(10)), '')
+          FROM devices) AS dev
+"""
+
+
+def watch_changes(stop: threading.Event, interval: float = 1.0) -> None:
+    """Avvisa le pagine aperte quando i dati cambiano, così si aggiornano senza ricaricare."""
+    last = None
+    while not stop.wait(interval):
+        try:
+            row = tuple(db.q1(FINGERPRINT_SQL))
+        except Exception as e:  # DB occupato o in migrazione: si riprova al giro dopo
+            print(f"[watch] {e}", flush=True)
+            continue
+        if last is not None and row != last:
+            hub.publish({"type": "refresh"})
+        last = row
 presence = broker.Presence(on_event=hub.publish)
 broker.presence_ref = presence
 ingestor = ingest.Ingest(on_message=hub.publish)
@@ -59,6 +85,7 @@ async def lifespan(app: FastAPI):
     hub.loop = asyncio.get_running_loop()
     threading.Thread(target=presence.run, name="presence", daemon=True).start()
     threading.Thread(target=ingest.purge_loop, args=(stop_event,), name="purge", daemon=True).start()
+    threading.Thread(target=watch_changes, args=(stop_event,), name="watch", daemon=True).start()
     ingestor.start()
     yield
     stop_event.set()
@@ -129,7 +156,8 @@ templates.env.globals["max_message_mb"] = config.MAX_MESSAGE_MB
 
 
 def render(request: Request, name: str, **ctx) -> HTMLResponse:
-    flash = request.session.pop("flash", None)
+    # Gli aggiornamenti in tempo reale (X-Live) non consumano il messaggio da mostrare all'utente
+    flash = None if request.headers.get("x-live") else request.session.pop("flash", None)
     return templates.TemplateResponse(request, name, {"flash": flash, "nav": name.split(".")[0], **ctx})
 
 
@@ -296,40 +324,11 @@ def _get_device(device_id: str) -> dict:
 
 
 @app.get("/devices", response_class=HTMLResponse)
-def devices_page(request: Request, new: str = ""):
+def devices_page(request: Request):
     return render(
-        request, "devices.html", devices=_devices_with_state(), prefill=new, default_days=config.CLIENT_CERT_DAYS,
+        request, "devices.html", devices=_devices_with_state(),
         enroll_enabled=config.ENROLL_ENABLED, enroll_port=config.ENROLL_PUBLIC_PORT,
     )
-
-
-@app.post("/devices")
-def create_device(
-    request: Request,
-    device_id: str = Form(...),
-    name: str = Form(""),
-    notes: str = Form(""),
-    days: int = Form(config.CLIENT_CERT_DAYS),
-):
-    device_id = device_id.strip()
-    if not DEVICE_ID_RE.match(device_id):
-        flash(request, "ID non valido: usa 2-64 caratteri tra lettere, numeri, punto, trattino e underscore "
-                       "(non può iniziare con un simbolo).", "error")
-        return redirect("/devices")
-    if db.q1("SELECT 1 FROM devices WHERE id=?", device_id):
-        flash(request, f"Esiste già un dispositivo con ID {device_id}.", "error")
-        return redirect(f"/devices/{device_id}")
-    days = max(1, min(days, 365 * 30))
-    with db.tx() as c:
-        c.execute(
-            "INSERT INTO devices(id, name, notes, created_at) VALUES(?,?,?,?)",
-            (device_id, name.strip(), notes.strip(), db.now()),
-        )
-        pki.issue_device_cert(device_id, days)
-        db.add_event("admin", device_id, "dispositivo creato, certificato rilasciato e canale aperto")
-    broker.apply()
-    flash(request, "Dispositivo creato. Scarica i certificati e caricali nella pagina broker dell'in-out.")
-    return redirect(f"/devices/{device_id}")
 
 
 @app.get("/devices/{device_id}", response_class=HTMLResponse)
@@ -337,9 +336,6 @@ def device_page(request: Request, device_id: str):
     device = _get_device(device_id)
     online = presence.snapshot().get(device_id)
     certs = db.q("SELECT * FROM certificates WHERE device_id=? ORDER BY issued_at DESC", device_id)
-    certs = [dict(c) | {"has_key": pki.issued_paths(c["serial"])[1].exists()} for c in certs]
-    # Registrato in automatico: la chiave del certificato in uso è solo sull'in-out
-    auto_enrolled = any(not c["has_key"] and not c["revoked_at"] for c in certs)
     events = db.q("SELECT * FROM events WHERE device_id=? ORDER BY id DESC LIMIT 30", device_id)
     messages = db.q(
         """SELECT m.*, (SELECT COUNT(*) FROM attachments a WHERE a.message_id=m.id) AS n_files
@@ -349,7 +345,7 @@ def device_page(request: Request, device_id: str):
     count = db.q1("SELECT COUNT(*) AS n FROM messages WHERE device_id=?", device_id)["n"]
     return render(
         request, "device.html", device=device, online=online, certs=certs, events=events,
-        messages=messages, msg_count=count, default_days=config.CLIENT_CERT_DAYS, auto_enrolled=auto_enrolled,
+        messages=messages, msg_count=count,
     )
 
 
@@ -371,25 +367,6 @@ def set_channel(request: Request, device_id: str, open: int = Form(...)):
     flash(request, "Canale aperto: il dispositivo si ricollegherà al prossimo tentativo e invierà le pesate in coda."
           if open else "Canale chiuso: il dispositivo è stato scollegato e non può ricollegarsi. "
                        "L'in-out tiene le pesate in coda e le invierà alla riapertura.")
-    return redirect(f"/devices/{device_id}")
-
-
-@app.post("/devices/{device_id}/certificates")
-def new_certificate(request: Request, device_id: str, days: int = Form(config.CLIENT_CERT_DAYS),
-                    revoke_previous: int = Form(0)):
-    _get_device(device_id)
-    days = max(1, min(days, 365 * 30))
-    with db.tx() as c:
-        previous = [r["serial"] for r in c.execute(
-            "SELECT serial FROM certificates WHERE device_id=? AND revoked_at IS NULL", (device_id,))]
-        serial = pki.issue_device_cert(device_id, days)
-        if revoke_previous:
-            for s in previous:
-                pki.revoke(s, "sostituito")
-        db.add_event("admin", device_id, f"nuovo certificato {serial[:12]}…"
-                     + (f", revocati {len(previous)} precedenti" if revoke_previous and previous else ""))
-    broker.apply(kick_devices=[device_id] if revoke_previous and previous else [])
-    flash(request, "Nuovo certificato rilasciato. Scarica lo zip e caricalo sull'in-out.")
     return redirect(f"/devices/{device_id}")
 
 
@@ -422,22 +399,6 @@ def cancel_certificate_request(request: Request, device_id: str):
     broker.publish_control(device_id, None)
     flash(request, "Richiesta annullata.")
     return redirect(f"/devices/{device_id}")
-
-
-@app.get("/devices/{device_id}/certificates/{serial}/bundle.zip")
-def download_bundle(device_id: str, serial: str):
-    row = db.q1("SELECT * FROM certificates WHERE serial=? AND device_id=?", serial, device_id)
-    if not row or row["revoked_at"]:
-        raise HTTPException(404, "Certificato non disponibile")
-    try:
-        data = pki.device_bundle(device_id, serial)
-    except FileNotFoundError as e:
-        raise HTTPException(404, str(e))
-    db.add_event("admin", device_id, f"scaricato il pacchetto certificati {serial[:12]}…")
-    return Response(
-        data, media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{device_id}-certificati.zip"'},
-    )
 
 
 @app.post("/devices/{device_id}/certificates/{serial}/revoke")

@@ -3,9 +3,9 @@
 Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello web per:
 
 - **registrazione automatica**: l'in-out si configura solo con l'host del broker, genera la sua chiave e riceve da solo il certificato client, che rinnova prima della scadenza;
-- **certificati**: CA interna, certificato del server, un certificato client per ogni in-out, rinnovo e revoca (anche manuali, con zip pronto da caricare);
+- **certificati**: CA interna, certificato del server, un certificato client per ogni in-out (la chiave privata resta sull'in-out), rinnovo, sostituzione su richiesta e revoca;
 - **canali**: ogni dispositivo può pubblicare solo sul proprio topic; il canale si può chiudere e riaprire senza toccare l'in-out;
-- **monitor live**: messaggi e connessioni in tempo reale;
+- **monitor live**: messaggi e connessioni in tempo reale; tutte le pagine del pannello si aggiornano da sole (nuovi dispositivi, stato online, certificati, eventi, messaggi) senza ricaricare;
 - **storico**: ogni pesata viene archiviata con foto, PDF e CSV, consultabile e filtrabile; pulizia automatica dopo `RETENTION_DAYS` giorni;
 - **stato**: dispositivi online/offline, eventi di connessione, tentativi rifiutati, log di Mosquitto.
 
@@ -87,7 +87,7 @@ Per un in-out registrato in automatico, nella pagina del dispositivo il pulsante
 
 Finché l'in-out non lo ritira, il dispositivo mostra la richiesta **in attesa** (annullabile). L'in-out resta sempre collegato, anche senza pesate da inviare, così riceve i comandi subito.
 
-Con `ENROLL_ENABLED=0` la registrazione automatica è disattivata e i certificati si rilasciano a mano dal pannello (**Dispositivi → Nuovo dispositivo**, zip con `ca.crt`, `client.crt`, `client.key`).
+La registrazione automatica è l'unico modo per rilasciare i certificati: il pannello non genera più chiavi né zip da caricare a mano. Con `ENROLL_ENABLED=0` nuovi in-out non possono registrarsi e i certificati non vengono rinnovati (quelli già rilasciati restano validi fino alla scadenza).
 
 L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scrivere solo sul topic `<ID>` (e `<ID>/#`) e di leggere solo i comandi su `<ID>/control`. Nessun dispositivo può leggere i messaggi degli altri.
 
@@ -140,7 +140,7 @@ docker run --rm -v broker-events-baronpesi_broker_data:/data -v "$PWD":/backup d
 ```
 app/
   main.py      pannello FastAPI (pagine, API, websocket live)
-  pki.py       CA, certificati, CRL, zip per gli in-out
+  pki.py       CA, certificati, CRL
   broker.py    mosquitto.conf, ACL, ricarica, scollegamento, lettura del log (stato online)
   ingest.py    subscriber MQTT interno che archivia i messaggi, pulizia dello storico
   enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)

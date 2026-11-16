@@ -2,7 +2,7 @@
 {% from "_macros.html" import messages_table %}
 {% block title %}Storico{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Storico messaggi</h1><span class="muted">{{ total }} messaggi · conservati {{ retention_days }} giorni</span></div>
+<div class="page-head"><h1>Storico messaggi</h1><span class="muted" data-live="total">{{ total }} messaggi · conservati {{ retention_days }} giorni</span></div>
 
 <form method="get" action="/messages" class="card filters">
   <label>Dispositivo
@@ -19,7 +19,7 @@
   <div class="filter-actions"><button class="btn primary">Filtra</button><a class="btn ghost" href="/messages">Azzera</a></div>
 </form>
 
-<section class="card">
+<section class="card" data-live="results">
   {{ messages_table(rows) }}
   {% if pages > 1 %}
   {% set qs = filters|dictsort|selectattr('1')|map('join', '=')|join('&') %}
