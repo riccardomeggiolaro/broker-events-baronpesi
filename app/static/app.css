@@ -82,6 +82,7 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .live-state { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .live-state[hidden] { display: none; }
 .live-state.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.live-state.wait { background: var(--warn, #d9a400); }
 .live-state.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-bg); }
 
 .container { max-width: 1280px; margin: 0 auto; padding: 20px; }
