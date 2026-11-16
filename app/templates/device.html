@@ -63,7 +63,7 @@
             {% else %}<span class="badge on">valido</span>{% endif %}</td>
         <td class="actions">
           {% if not c.revoked_at %}
-            {% if c.has_key %}<a class="btn small primary" href="/devices/{{ device.id }}/certificates/{{ c.serial }}/bundle.zip">Scarica zip</a>{% endif %}
+            {% if c.has_key %}<a class="btn small primary" href="/devices/{{ device.id }}/certificates/{{ c.serial }}/bundle.zip">Scarica zip</a>{% else %}<span class="muted small">chiave sull'in-out</span>{% endif %}
             <form method="post" action="/devices/{{ device.id }}/certificates/{{ c.serial }}/revoke" data-confirm="Revocare questo certificato? Il dispositivo non potrà più collegarsi con esso."><button class="btn small danger">Revoca</button></form>
           {% endif %}
         </td>

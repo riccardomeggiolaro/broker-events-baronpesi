@@ -10,6 +10,7 @@ services:
     env_file: .env
     ports:
       - "${BROKER_PUBLIC_PORT:-8883}:8883"   # MQTT su TLS, raggiungibile dagli in-out
+      - "${ENROLL_PUBLIC_PORT:-8884}:8884"   # registrazione automatica degli in-out (HTTPS)
     expose:
       - "8080"                               # pannello: pubblicato solo tramite Caddy
     volumes:
