@@ -15,7 +15,7 @@
       <dt>Autenticazione</dt><dd>solo certificato client firmato da questa CA</dd>
       <dt>Topic</dt><dd>ogni dispositivo scrive solo su <code>&lt;ID&gt;</code> e <code>&lt;ID&gt;/#</code></dd>
       <dt>Messaggio massimo</dt><dd>{{ max_message_mb }} MB</dd>
-      <dt>Stato</dt><dd>
+      <dt>Stato</dt><dd data-live="status">
         <span class="pill {{ 'ok' if status.broker_running else 'bad' }}">broker {{ 'attivo' if status.broker_running else 'fermo' }}</span>
         <span class="pill {{ 'ok' if status.ingest_connected else 'bad' }}">archivio {{ 'collegato' if status.ingest_connected else 'scollegato' }}</span>
         {% if status.ingest_error %}<div class="muted small">{{ status.ingest_error }}</div>{% endif %}
@@ -39,7 +39,7 @@
   </section>
 </div>
 
-<section class="card">
+<section class="card" data-live="revoked">
   <h2>Certificati revocati</h2>
   <div class="table-wrap">
   <table class="table compact">
@@ -54,8 +54,8 @@
 </section>
 
 <section class="card">
-  <div class="card-head"><h2>Log di Mosquitto</h2><a class="btn small ghost" href="/broker">Aggiorna</a></div>
-  <pre class="raw log" id="broker-log">{% for l in log %}{{ l }}
+  <div class="card-head"><h2>Log di Mosquitto</h2></div>
+  <pre class="raw log" id="broker-log" data-live="log" data-scroll="bottom">{% for l in log %}{{ l }}
 {% endfor %}</pre>
 </section>
 {% endblock %}

@@ -2,6 +2,7 @@
 {% from "_macros.html" import state, event_badge, messages_table %}
 {% block title %}Panoramica{% endblock %}
 {% block content %}
+<div data-live="dashboard">
 <div class="page-head">
   <h1>Panoramica</h1>
   <div class="health">
@@ -11,7 +12,7 @@
 </div>
 
 <div class="stats">
-  <div class="stat"><div class="label">Dispositivi online</div><div class="value" id="st-online">{{ status.devices_online }}<span class="of">/ {{ status.devices }}</span></div></div>
+  <div class="stat"><div class="label">Dispositivi online</div><div class="value">{{ status.devices_online }}<span class="of">/ {{ status.devices }}</span></div></div>
   <div class="stat"><div class="label">Messaggi ultime 24 h</div><div class="value">{{ status.messages_24h }}</div></div>
   <div class="stat"><div class="label">Messaggi in archivio</div><div class="value">{{ status.messages_total }}</div></div>
   <div class="stat"><div class="label">Spazio usato</div><div class="value">{{ status.storage|size }}</div><div class="hint">conservazione {{ retention_days }} giorni</div></div>
@@ -35,11 +36,11 @@
       {% for d in devices %}
         <tr class="clickable" data-href="/devices/{{ d.id }}">
           <td><a href="/devices/{{ d.id }}">{{ d.name or d.id }}</a>{% if d.name %}<div class="muted small mono">{{ d.id }}</div>{% endif %}</td>
-          <td data-presence="{{ d.id }}" data-channel="{{ d.channel_open }}">{{ state(d.online, d.channel_open) }}</td>
+          <td>{{ state(d.online, d.channel_open) }}</td>
           <td class="nowrap">{{ d.last_msg_at|ago }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="3" class="empty">Nessun dispositivo. <a href="/devices">Aggiungi il primo</a>.</td></tr>
+        <tr><td colspan="3" class="empty">Nessun dispositivo: compariranno qui appena un in-out si registra.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -65,4 +66,5 @@
   <div class="card-head"><h2>Ultimi messaggi</h2><a class="btn small" href="/messages">Storico completo</a></div>
   {{ messages_table(recent) }}
 </section>
+</div>
 {% endblock %}

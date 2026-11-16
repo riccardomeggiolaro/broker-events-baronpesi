@@ -2,17 +2,17 @@
 {% from "_macros.html" import state, event_badge, messages_table %}
 {% block title %}{{ device.name or device.id }}{% endblock %}
 {% block content %}
-<div class="page-head">
+<div class="page-head" data-live="head">
   <div>
     <a href="/devices" class="muted small">← Dispositivi</a>
     <h1>{{ device.name or device.id }}</h1>
     <div class="mono muted">{{ device.id }}</div>
   </div>
-  <div data-presence="{{ device.id }}" data-channel="{{ device.channel_open }}" class="big-state">{{ state(online, device.channel_open) }}</div>
+  <div class="big-state">{{ state(online, device.channel_open) }}</div>
 </div>
 
 <div class="grid-2">
-  <section class="card">
+  <section class="card" data-live="connection">
     <h2>Connessione</h2>
     <dl class="kv">
       <dt>Broker</dt><dd class="mono">{{ broker_host }}:{{ broker_port }} (TLS)</dd>
@@ -47,9 +47,9 @@
   </section>
 </div>
 
-<section class="card">
+<section class="card" data-live="certs">
   <div class="card-head"><h2>Certificati</h2></div>
-  <p class="muted small">Lo zip contiene <code>ca.crt</code>, <code>client.crt</code> e <code>client.key</code>: caricali nei tre campi della pagina broker dell'in-out.</p>
+  <p class="muted small">Le chiavi private restano sull'in-out: il broker firma solo la richiesta e rilascia il certificato.</p>
   <div class="table-wrap">
   <table class="table">
     <thead><tr><th>Seriale</th><th>Rilasciato</th><th>Scadenza</th><th>Stato</th><th></th></tr></thead>
@@ -63,7 +63,6 @@
             {% else %}<span class="badge on">valido</span>{% endif %}</td>
         <td class="actions">
           {% if not c.revoked_at %}
-            {% if c.has_key %}<a class="btn small primary" href="/devices/{{ device.id }}/certificates/{{ c.serial }}/bundle.zip">Scarica zip</a>{% else %}<span class="muted small">chiave sull'in-out</span>{% endif %}
             <form method="post" action="/devices/{{ device.id }}/certificates/{{ c.serial }}/revoke" data-confirm="Revocare questo certificato? Il dispositivo non potrà più collegarsi con esso."><button class="btn small danger">Revoca</button></form>
           {% endif %}
         </td>
@@ -80,22 +79,16 @@
       l'in-out lo ritira appena è collegato, poi i certificati precedenti vengono revocati.</p>
     <form method="post" action="/devices/{{ device.id }}/certificate-request/cancel"><button class="btn small">Annulla richiesta</button></form>
   </div>
-  {% elif auto_enrolled %}
+  {% else %}
   <form method="post" action="/devices/{{ device.id }}/certificate-request" class="inline-form"
         data-confirm="Chiedere all'in-out di generare una nuova chiave e ritirare un nuovo certificato? Quelli attuali verranno revocati.">
-    <span class="muted small">L'in-out si è registrato da solo: genera una nuova chiave, ritira il certificato e si ricollega.</span>
+    <span class="muted small">L'in-out genera una nuova chiave, ritira il certificato e si ricollega.</span>
     <button class="btn">Nuovo certificato all'in-out</button>
-  </form>
-  {% else %}
-  <form method="post" action="/devices/{{ device.id }}/certificates" class="inline-form">
-    <label>Validità (giorni)<input name="days" type="number" min="1" max="10950" value="{{ default_days }}"></label>
-    <label class="check"><input type="checkbox" name="revoke_previous" value="1" checked> revoca i certificati precedenti</label>
-    <button class="btn">Rilascia nuovo certificato</button>
   </form>
   {% endif %}
 </section>
 
-<div class="grid-2">
+<div class="grid-2" data-live="activity">
   <section class="card">
     <div class="card-head"><h2>Ultimi messaggi</h2><a class="btn small" href="/messages?device={{ device.id }}">Tutti</a></div>
     {{ messages_table(messages, show_device=False) }}
@@ -114,7 +107,7 @@
   <h2>Elimina dispositivo</h2>
   <p class="muted small">Revoca tutti i certificati e chiude il canale.</p>
   <form method="post" action="/devices/{{ device.id }}/delete" class="inline-form" data-confirm="Eliminare definitivamente {{ device.id }}?">
-    <label class="check"><input type="checkbox" name="delete_messages" value="1"> elimina anche i {{ msg_count }} messaggi archiviati</label>
+    <label class="check"><input type="checkbox" name="delete_messages" value="1"> elimina anche i messaggi archiviati</label>
     <button class="btn danger">Elimina</button>
   </form>
 </section>

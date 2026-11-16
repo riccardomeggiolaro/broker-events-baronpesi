@@ -18,6 +18,7 @@
     <a href="/messages" class="{{ 'active' if nav in ('messages', 'message') }}">Storico</a>
     <a href="/broker" class="{{ 'active' if nav == 'broker' }}">Broker</a>
   </nav>
+  <span class="live-state" id="live-state" hidden></span>
   <form method="post" action="/logout" class="logout"><button class="btn ghost small">Esci</button></form>
 </header>
 {% endif %}

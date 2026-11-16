@@ -12,24 +12,78 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const fmtTime = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString("it-IT"); };
 const fmtSize = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 
-// Aggiorna i badge online/offline nelle pagine con elementi [data-presence]
-function paintPresence(online) {
-  document.querySelectorAll("[data-presence]").forEach((el) => {
-    if (el.dataset.channel === "0") return;
-    const on = Object.prototype.hasOwnProperty.call(online, el.dataset.presence);
-    el.innerHTML = on ? '<span class="badge on">online</span>' : '<span class="badge off">offline</span>';
-  });
-}
+const wsUrl = () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/live`;
 
-if (document.querySelector("[data-presence]") && !window.location.pathname.startsWith("/live")) {
-  const refresh = () => fetch("/api/status").then((r) => r.ok ? r.json() : null).then((s) => {
-    if (!s) return;
-    paintPresence(s.online);
-    const st = document.getElementById("st-online");
-    if (st) st.innerHTML = `${s.devices_online}<span class="of">/ ${s.devices}</span>`;
-  }).catch(() => {});
-  setInterval(refresh, 5000);
+// Aggiornamento in tempo reale: a ogni evento del broker (messaggio, connessione, registrazione,
+// modifica fatta da un altro pannello) la pagina viene riscaricata in background e si sostituiscono
+// solo le zone [data-live] cambiate. I campi in cui si sta scrivendo non vengono toccati.
+function startAutoRefresh() {
+  if (!document.querySelector("[data-live]")) return;
+  const indicator = document.getElementById("live-state");
+  let timer = null, busy = false, again = false, everConnected = false;
+
+  function swap(doc) {
+    document.querySelectorAll("[data-live]").forEach((el) => {
+      const fresh = doc.querySelector(`[data-live="${CSS.escape(el.dataset.live)}"]`);
+      if (!fresh || fresh.outerHTML === el.outerHTML) return;
+      const active = document.activeElement;
+      if (active && el.contains(active) && active.matches("input, textarea, select")) return;
+      const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      const scrollTop = el.scrollTop;
+      const node = document.importNode(fresh, true);
+      el.replaceWith(node);
+      if (node.dataset.scroll === "bottom") node.scrollTop = wasAtBottom ? node.scrollHeight : scrollTop;
+    });
+  }
+
+  async function refresh() {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const r = await fetch(location.href, { headers: { "X-Live": "1" }, cache: "no-store" });
+      if (r.redirected && new URL(r.url).pathname === "/login") { location.href = "/login"; return; }
+      if (r.status === 404 && location.pathname.startsWith("/devices/")) { location.href = "/devices"; return; }
+      if (!r.ok) return;
+      swap(new DOMParser().parseFromString(await r.text(), "text/html"));
+    } catch (e) { /* rete assente: si riprova al prossimo evento */ }
+    finally {
+      busy = false;
+      if (again) { again = false; schedule(); }
+    }
+  }
+  const schedule = () => { if (!timer) timer = setTimeout(() => { timer = null; refresh(); }, 400); };
+
+  function setState(ok) {
+    if (!indicator) return;
+    indicator.hidden = false;
+    indicator.className = `live-state ${ok ? "ok" : "bad"}`;
+    indicator.title = ok ? "Aggiornamento in tempo reale attivo" : "Aggiornamento in tempo reale interrotto, riprovo…";
+  }
+
+  function connect() {
+    const ws = new WebSocket(wsUrl());
+    ws.onopen = () => setState(true);
+    ws.onclose = (e) => {
+      setState(false);
+      if (e.code === 4401) { location.href = "/login"; return; }
+      setTimeout(connect, 2000);
+    };
+    ws.onmessage = (m) => {
+      const ev = JSON.parse(m.data);
+      if (ev.type === "hello") {
+        if (everConnected) schedule();  // ricollegato: recupera quello che è cambiato nel frattempo
+        everConnected = true;
+        return;
+      }
+      schedule();
+    };
+  }
+  connect();
+  // Tempi relativi ("3 min fa") e stato del broker restano aggiornati anche senza eventi
+  setInterval(() => { if (!document.hidden) schedule(); }, 30000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(); });
 }
+if (!location.pathname.startsWith("/live")) startAutoRefresh();
 
 // Monitor live
 function startLive() {
@@ -109,7 +163,7 @@ function startLive() {
   });
 
   function connect() {
-    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/live`);
+    const ws = new WebSocket(wsUrl());
     ws.onopen = () => { state.textContent = "in ascolto"; state.className = "pill ok"; };
     ws.onclose = (e) => {
       state.textContent = "disconnesso, riprovo…"; state.className = "pill bad";
@@ -118,6 +172,7 @@ function startLive() {
     };
     ws.onmessage = (m) => {
       const ev = JSON.parse(m.data);
+      if (ev.type === "refresh") return;  // solo per le altre pagine
       if (ev.type === "hello") {
         Object.keys(online).forEach((k) => delete online[k]);
         Object.assign(online, ev.online);

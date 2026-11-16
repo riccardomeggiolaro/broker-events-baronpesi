@@ -5,10 +5,8 @@ Tutte le chiavi sono ECDSA P-256. La CA firma:
 - il certificato interno del pannello (CN = __monitor__)
 - un certificato client per ogni dispositivo (CN = ID del dispositivo)
 """
-import io
 import os
 import ipaddress
-import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -194,17 +192,6 @@ def issued_paths(serial: str) -> tuple[Path, Path]:
     return config.ISSUED_DIR / f"{serial}.crt", config.ISSUED_DIR / f"{serial}.key"
 
 
-def issue_device_cert(device_id: str, days: int) -> str:
-    """Rilascia un certificato (chiave generata qui) per il dispositivo, lo registra e ritorna il seriale."""
-    key, cert = _issue(device_id, days)
-    serial = format(cert.serial_number, "x")
-    crt_path, key_path = issued_paths(serial)
-    _write_key(key_path, key)
-    _write_cert(crt_path, cert)
-    _register(device_id, serial, cert)
-    return serial
-
-
 def sign_device_csr(device_id: str, public_key, days: int) -> tuple[str, x509.Certificate]:
     """Firma la chiave pubblica di una richiesta (CSR) del dispositivo: la chiave privata resta sull'in-out."""
     _, cert = _issue(device_id, days, public_key=public_key)
@@ -287,32 +274,6 @@ def write_crl() -> None:
     tmp.write_bytes(crl.public_bytes(serialization.Encoding.PEM))
     tmp.chmod(0o644)
     tmp.replace(CRL)
-
-
-def device_bundle(device_id: str, serial: str) -> bytes:
-    """Zip con ca.crt, client.crt e client.key (i nomi usati dalla pagina broker dell'in-out)."""
-    crt_path, key_path = issued_paths(serial)
-    if not key_path.exists():
-        raise FileNotFoundError("Chiave privata non disponibile per questo certificato")
-    readme = (
-        f"Certificati MQTT per il dispositivo {device_id}\n\n"
-        f"Broker:   {config.BROKER_HOST}:{config.BROKER_PUBLIC_PORT} (TLS)\n"
-        f"Client ID / topic: {device_id}\n\n"
-        "Nella configurazione del broker dell'in-out:\n"
-        f"  - Host: {config.BROKER_HOST}\n"
-        f"  - Porta: {config.BROKER_PUBLIC_PORT}\n"
-        "  - Username e password: vuoti\n"
-        "  - Certificato CA: ca.crt\n"
-        "  - Certificato client: client.crt\n"
-        "  - Chiave client: client.key\n"
-    )
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("ca.crt", CA_CRT.read_bytes())
-        z.writestr("client.crt", crt_path.read_bytes())
-        z.writestr("client.key", key_path.read_bytes())
-        z.writestr("LEGGIMI.txt", readme)
-    return buf.getvalue()
 
 
 def cert_info(path: Path) -> dict:
