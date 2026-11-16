@@ -1,0 +1,27 @@
+# Portainer: gestione dei container dal browser (avvio/stop, log, statistiche).
+# Va avviato DOPO lo stack del broker, perché usa la sua rete "baronpesi"
+# e viene pubblicato in HTTPS dal Caddy del broker su PORTAINER_HOST.
+#   nel .env: PORTAINER_HOST=portainer.tuodominio.it   (DNS verso la VPS)
+#   docker compose up -d                     (ricrea Caddy con il nuovo host)
+#   docker compose -f docker-compose.portainer.yml up -d
+# Primo accesso entro 5 minuti dall'avvio per creare l'utente admin.
+services:
+  portainer:
+    image: portainer/portainer-ce:lts
+    container_name: portainer
+    restart: unless-stopped
+    command: -H unix:///var/run/docker.sock
+    expose:
+      - "9000"                               # solo tramite Caddy, nessuna porta pubblica
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - baronpesi
+
+networks:
+  baronpesi:
+    external: true
+
+volumes:
+  portainer_data:

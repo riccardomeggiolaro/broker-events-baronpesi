@@ -10,3 +10,15 @@
 		Referrer-Policy "same-origin"
 	}
 }
+
+# Portainer (docker-compose.portainer.yml). Se PORTAINER_HOST non è impostato
+# il blocco resta su portainer.localhost, non raggiungibile da fuori.
+{$PORTAINER_HOST:portainer.localhost} {
+	encode gzip
+	reverse_proxy portainer:9000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+}

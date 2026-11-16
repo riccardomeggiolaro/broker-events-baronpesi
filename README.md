@@ -89,6 +89,29 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 
 Se cambi `BROKER_HOST`, il certificato del server viene rigenerato al riavvio. I certificati client restano validi, perché la CA non cambia.
 
+## Portainer (gestione dei container dal browser)
+
+Opzionale, solo per l'installazione su VPS con Caddy. Portainer permette di vedere stato, log e statistiche dei container e di riavviarli dal browser, su `https://PORTAINER_HOST`.
+
+1. Crea un record DNS (es. `portainer.tuodominio.it`) che punta alla VPS e impostalo nel `.env`: `PORTAINER_HOST=portainer.tuodominio.it`.
+2. Riavvia lo stack del broker, così Caddy prende il nuovo host e viene creata la rete `baronpesi`:
+
+```bash
+docker compose up -d
+```
+
+3. Avvia Portainer:
+
+```bash
+docker compose -f docker-compose.portainer.yml up -d
+```
+
+4. Apri `https://PORTAINER_HOST` **entro 5 minuti** e crea l'utente admin. Se il tempo scade, Portainer si blocca per sicurezza: `docker restart portainer` e riprova.
+
+Lo stack del broker appare in Portainer come stack "esterno" (avviato da riga di comando): puoi riavviare i container e leggere i log, mentre per modificarne la configurazione continua a usare `docker compose`.
+
+> Portainer ha accesso completo a Docker sulla VPS (equivale a root): usa una password robusta e, se possibile, attiva l'autenticazione a due fattori.
+
 ## Dati e backup
 
 Tutto è nel volume `broker_data` (`/data` nel container):

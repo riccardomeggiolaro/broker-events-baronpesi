@@ -24,6 +24,7 @@ services:
     restart: unless-stopped
     environment:
       BROKER_HOST: ${BROKER_HOST}
+      PORTAINER_HOST: ${PORTAINER_HOST:-portainer.localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -33,6 +34,11 @@ services:
       - caddy_config:/config
     depends_on:
       - broker
+
+# Rete con nome fisso: la usa anche docker-compose.portainer.yml
+networks:
+  default:
+    name: baronpesi
 
 volumes:
   broker_data:
