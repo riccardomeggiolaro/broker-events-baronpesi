@@ -22,17 +22,27 @@ function startAutoRefresh() {
   const indicator = document.getElementById("live-state");
   let timer = null, busy = false, again = false, everConnected = false;
 
+  // Un campo modificato e non ancora inviato non va sovrascritto
+  const dirty = (el) => [el, ...el.querySelectorAll("*")].filter((f) => f.matches("input, textarea, select")).some((f) =>
+    f === document.activeElement
+    || (f.tagName === "SELECT" ? f.value !== ([...f.options].find((o) => o.defaultSelected) || f.options[0] || {}).value
+      : f.type === "checkbox" || f.type === "radio" ? f.checked !== f.defaultChecked
+      : f.value !== f.defaultValue));
+
   function swap(doc) {
     document.querySelectorAll("[data-live]").forEach((el) => {
       const fresh = doc.querySelector(`[data-live="${CSS.escape(el.dataset.live)}"]`);
-      if (!fresh || fresh.outerHTML === el.outerHTML) return;
-      const active = document.activeElement;
-      if (active && el.contains(active) && active.matches("input, textarea, select")) return;
+      // Si confronta con l'HTML ricevuto l'ultima volta (le righe evidenziate cambiano classe)
+      if (!fresh || fresh.outerHTML === (el.liveHtml ?? el.outerHTML) || dirty(el)) return;
+      const seen = new Set([...el.querySelectorAll("tr[data-href]")].map((tr) => tr.dataset.href));
       const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       const scrollTop = el.scrollTop;
       const node = document.importNode(fresh, true);
+      node.liveHtml = fresh.outerHTML;
       el.replaceWith(node);
       if (node.dataset.scroll === "bottom") node.scrollTop = wasAtBottom ? node.scrollHeight : scrollTop;
+      // Righe nuove (messaggi, dispositivi) evidenziate per un attimo
+      node.querySelectorAll("tr[data-href]").forEach((tr) => { if (!seen.has(tr.dataset.href)) tr.classList.add("flash-new"); });
     });
   }
 
@@ -42,7 +52,10 @@ function startAutoRefresh() {
     try {
       const r = await fetch(location.href, { headers: { "X-Live": "1" }, cache: "no-store" });
       if (r.redirected && new URL(r.url).pathname === "/login") { location.href = "/login"; return; }
-      if (r.status === 404 && location.pathname.startsWith("/devices/")) { location.href = "/devices"; return; }
+      if (r.status === 404) {  // eliminato da un'altra parte: si torna all'elenco
+        const list = { devices: "/devices", messages: "/messages" }[location.pathname.split("/")[1]];
+        if (list && location.pathname !== list) { location.href = list; return; }
+      }
       if (!r.ok) return;
       swap(new DOMParser().parseFromString(await r.text(), "text/html"));
     } catch (e) { /* rete assente: si riprova al prossimo evento */ }
