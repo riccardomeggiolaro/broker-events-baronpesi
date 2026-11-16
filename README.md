@@ -73,12 +73,23 @@ Nel pannello il dispositivo compare da solo con il **canale aperto**. L'in-out c
 | dispositivo nuovo | certificato rilasciato, dispositivo creato con canale aperto |
 | stessa chiave di un certificato valido | rinnovo: quello in uso resta valido fino alla scadenza, i precedenti vengono revocati |
 | canale chiuso | rifiutata: **per bloccare un in-out chiudi il canale** |
+| dispositivo eliminato o certificato revocato dal pannello | l'in-out, rifiutato da Mosquitto, controlla la CRL (`https://BROKER_HOST:8884/crl.pem`), elimina il certificato e si registra di nuovo da solo (con il canale chiuso invece aspetta) |
 | chiave di un certificato revocato dall'amministratore | rifiutata: l'in-out genera una nuova chiave e riprova |
 | altra chiave, ma il dispositivo ha già un certificato valido (es. in-out reinstallato) | rifiutata: revoca il vecchio certificato dal pannello e l'in-out si registra da solo al tentativo successivo (ogni 30 s) |
 
+### Nuovo certificato dal pannello
+
+Per un in-out registrato in automatico, nella pagina del dispositivo il pulsante **Nuovo certificato all'in-out**:
+
+1. pubblica un comando *retained* sul topic `<ID>/control`, che l'in-out legge appena collegato (anche se al momento è spento);
+2. l'in-out genera una **nuova chiave**, ritira il nuovo certificato sulla porta 8884 e si ricollega;
+3. in quel momento i certificati precedenti vengono revocati e il comando viene cancellato.
+
+Finché l'in-out non lo ritira, il dispositivo mostra la richiesta **in attesa** (annullabile). L'in-out resta sempre collegato, anche senza pesate da inviare, così riceve i comandi subito.
+
 Con `ENROLL_ENABLED=0` la registrazione automatica è disattivata e i certificati si rilasciano a mano dal pannello (**Dispositivi → Nuovo dispositivo**, zip con `ca.crt`, `client.crt`, `client.key`).
 
-L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scrivere solo sul topic `<ID>` (e `<ID>/#`). Nessun dispositivo può leggere i messaggi degli altri.
+L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scrivere solo sul topic `<ID>` (e `<ID>/#`) e di leggere solo i comandi su `<ID>/control`. Nessun dispositivo può leggere i messaggi degli altri.
 
 ## Canali, revoca e pesate in coda
 

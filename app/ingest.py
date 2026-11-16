@@ -98,6 +98,9 @@ class Ingest:
 
     # ------------------------------------------------------------------
     def store(self, topic: str, payload: bytes) -> dict | None:
+        # I comandi verso gli in-out (<id>/control) non sono pesate
+        if topic.endswith("/" + config.CONTROL_SUFFIX):
+            return None
         device_id = topic.split("/")[0]
         received_at = db.now()
         size = len(payload)

@@ -6,6 +6,7 @@ import os
 import shutil
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -337,6 +338,8 @@ def device_page(request: Request, device_id: str):
     online = presence.snapshot().get(device_id)
     certs = db.q("SELECT * FROM certificates WHERE device_id=? ORDER BY issued_at DESC", device_id)
     certs = [dict(c) | {"has_key": pki.issued_paths(c["serial"])[1].exists()} for c in certs]
+    # Registrato in automatico: la chiave del certificato in uso è solo sull'in-out
+    auto_enrolled = any(not c["has_key"] and not c["revoked_at"] for c in certs)
     events = db.q("SELECT * FROM events WHERE device_id=? ORDER BY id DESC LIMIT 30", device_id)
     messages = db.q(
         """SELECT m.*, (SELECT COUNT(*) FROM attachments a WHERE a.message_id=m.id) AS n_files
@@ -346,7 +349,7 @@ def device_page(request: Request, device_id: str):
     count = db.q1("SELECT COUNT(*) AS n FROM messages WHERE device_id=?", device_id)["n"]
     return render(
         request, "device.html", device=device, online=online, certs=certs, events=events,
-        messages=messages, msg_count=count, default_days=config.CLIENT_CERT_DAYS,
+        messages=messages, msg_count=count, default_days=config.CLIENT_CERT_DAYS, auto_enrolled=auto_enrolled,
     )
 
 
@@ -387,6 +390,37 @@ def new_certificate(request: Request, device_id: str, days: int = Form(config.CL
                      + (f", revocati {len(previous)} precedenti" if revoke_previous and previous else ""))
     broker.apply(kick_devices=[device_id] if revoke_previous and previous else [])
     flash(request, "Nuovo certificato rilasciato. Scarica lo zip e caricalo sull'in-out.")
+    return redirect(f"/devices/{device_id}")
+
+
+@app.post("/devices/{device_id}/certificate-request")
+def request_certificate(request: Request, device_id: str):
+    """Chiede all'in-out (registrato in automatico) di ritirare un nuovo certificato con una nuova chiave."""
+    _get_device(device_id)
+    request_id = uuid.uuid4().hex
+    with db.tx() as c:
+        c.execute("UPDATE devices SET renew_requested_at=? WHERE id=?", (db.now(), device_id))
+        db.add_event("admin", device_id, "richiesto un nuovo certificato all'in-out")
+    sent = broker.publish_control(
+        device_id, {"command": "renew_certificate", "request_id": request_id, "requested_at": db.now()}
+    )
+    if sent:
+        flash(request, "Richiesta inviata: l'in-out genera una nuova chiave e ritira il certificato appena è collegato. "
+                       "I certificati precedenti vengono revocati in quel momento.")
+    else:
+        flash(request, "Richiesta registrata, ma il messaggio all'in-out non è partito (broker non raggiungibile?). "
+                       "Riprova tra poco.", "error")
+    return redirect(f"/devices/{device_id}")
+
+
+@app.post("/devices/{device_id}/certificate-request/cancel")
+def cancel_certificate_request(request: Request, device_id: str):
+    _get_device(device_id)
+    with db.tx() as c:
+        c.execute("UPDATE devices SET renew_requested_at=NULL WHERE id=?", (device_id,))
+        db.add_event("admin", device_id, "annullata la richiesta di nuovo certificato")
+    broker.publish_control(device_id, None)
+    flash(request, "Richiesta annullata.")
     return redirect(f"/devices/{device_id}")
 
 

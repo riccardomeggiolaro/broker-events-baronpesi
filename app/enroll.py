@@ -5,6 +5,10 @@ mai il dispositivo) e invia una richiesta CSR con il proprio client ID. Il
 broker firma subito la richiesta, crea il dispositivo con il canale aperto e
 ricarica Mosquitto: l'in-out può collegarsi sulla porta MQTT 8883.
 
+Il servizio pubblica anche la CRL (/crl.pem): se la connessione MQTT viene
+rifiutata, l'in-out la consulta e, se il suo certificato è stato revocato (es.
+dispositivo eliminato dal pannello), si registra di nuovo da solo.
+
 Il servizio usa il certificato del server Mosquitto (firmato dalla CA interna).
 Al primo contatto l'in-out scarica la CA da /ca.crt senza verificarla (fiducia
 al primo contatto), poi la usa per verificare il servizio e il broker.
@@ -15,6 +19,8 @@ Regole:
                                                          alla scadenza, i precedenti vengono revocati)
 - stessa chiave di un certificato revocato            -> rifiutato (key_revoked: l'in-out genera una nuova chiave)
 - canale chiuso                                       -> rifiutato (channel_closed)
+- altra chiave con "nuovo certificato" richiesto dal
+  pannello (comando retained su <id>/control)         -> certificato rilasciato, i precedenti revocati
 - altra chiave e il dispositivo ha già un certificato
   valido                                              -> rifiutato (already_enrolled): per sostituirlo
                                                          revoca il certificato dal pannello
@@ -38,6 +44,8 @@ RATE_WINDOW = 60
 RATE_MAX = 20
 # Motivo di revoca dei certificati sostituiti da un rinnovo (non blocca la chiave)
 RENEWED = "rinnovato"
+# Motivo di revoca dei certificati sostituiti su richiesta del pannello (blocca la vecchia chiave)
+REPLACED = "sostituito"
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 _rate: dict[str, list[float]] = {}
@@ -87,6 +95,13 @@ def ca_crt():
     return Response(pki.CA_CRT.read_bytes(), media_type="application/x-pem-file")
 
 
+@app.get("/crl.pem")
+def crl_pem():
+    """CRL firmata dalla CA: l'in-out la usa per capire se il suo certificato è stato
+    revocato (deve registrarsi di nuovo) o sospeso (canale chiuso: deve aspettare)."""
+    return Response(pki.CRL.read_bytes(), media_type="application/x-pem-file")
+
+
 @app.post("/enroll")
 def enroll(body: EnrollRequest, request: Request):
     ip = _client_ip(request)
@@ -130,7 +145,9 @@ def enroll(body: EnrollRequest, request: Request):
         now = datetime.now(timezone.utc)
         active = [r for r in certs if not r["revoked_at"] and datetime.fromisoformat(r["not_after"]) > now]
         renew = [r for r in same_key if not r["revoked_at"]]
-        if not renew and active:
+        # Nuovo certificato richiesto dal pannello: l'in-out si presenta con una chiave nuova
+        replace = bool(device and device["renew_requested_at"]) and not renew
+        if not renew and active and not replace:
             db.add_event("denied", device_id, f"registrazione rifiutata da {ip}: il dispositivo ha già un certificato valido")
             return _error(409, "already_enrolled",
                           "Il dispositivo ha già un certificato valido con un'altra chiave: "
@@ -146,8 +163,18 @@ def enroll(body: EnrollRequest, request: Request):
         # salvare quello nuovo può continuare a collegarsi. I precedenti vengono revocati.
         for r in sorted(renew, key=lambda r: r["issued_at"])[:-1]:
             pki.revoke(r["serial"], RENEWED)
+        if replace:
+            # Sostituzione richiesta dal pannello: i certificati (e le chiavi) precedenti
+            # vengono revocati subito, l'in-out si ricollega con quello nuovo
+            for r in certs:
+                if not r["revoked_at"]:
+                    pki.revoke(r["serial"], REPLACED)
+            c.execute("UPDATE devices SET renew_requested_at=NULL WHERE id=?", (device_id,))
         c.execute("UPDATE devices SET last_ip=? WHERE id=?", (ip, device_id))
-        if renew:
+        if replace:
+            db.add_event("admin", device_id, f"nuovo certificato ritirato dall'in-out ({ip}, {serial[:12]}…), "
+                                             "certificati precedenti revocati")
+        elif renew:
             db.add_event("admin", device_id, f"certificato rinnovato automaticamente da {ip} ({serial[:12]}…)")
         elif device:
             db.add_event("admin", device_id, f"nuovo certificato rilasciato automaticamente a {ip} ({serial[:12]}…)")
@@ -155,6 +182,8 @@ def enroll(body: EnrollRequest, request: Request):
             db.add_event("admin", device_id, f"dispositivo registrato automaticamente da {ip} ({serial[:12]}…), canale aperto")
 
     broker.apply()
+    if replace:
+        broker.publish_control(device_id, None)  # richiesta evasa: si cancella il messaggio retained
     print(f"[enroll] certificato {serial[:12]}… rilasciato a {device_id} ({ip})", flush=True)
     return {
         "device_id": device_id,

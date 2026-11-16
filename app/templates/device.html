@@ -74,11 +74,25 @@
     </tbody>
   </table>
   </div>
+  {% if device.renew_requested_at %}
+  <div class="inline-form">
+    <p class="small"><span class="badge closed">in attesa</span> Nuovo certificato richiesto il {{ device.renew_requested_at|dt }}:
+      l'in-out lo ritira appena è collegato, poi i certificati precedenti vengono revocati.</p>
+    <form method="post" action="/devices/{{ device.id }}/certificate-request/cancel"><button class="btn small">Annulla richiesta</button></form>
+  </div>
+  {% elif auto_enrolled %}
+  <form method="post" action="/devices/{{ device.id }}/certificate-request" class="inline-form"
+        data-confirm="Chiedere all'in-out di generare una nuova chiave e ritirare un nuovo certificato? Quelli attuali verranno revocati.">
+    <span class="muted small">L'in-out si è registrato da solo: genera una nuova chiave, ritira il certificato e si ricollega.</span>
+    <button class="btn">Nuovo certificato all'in-out</button>
+  </form>
+  {% else %}
   <form method="post" action="/devices/{{ device.id }}/certificates" class="inline-form">
     <label>Validità (giorni)<input name="days" type="number" min="1" max="10950" value="{{ default_days }}"></label>
     <label class="check"><input type="checkbox" name="revoke_previous" value="1" checked> revoca i certificati precedenti</label>
     <button class="btn">Rilascia nuovo certificato</button>
   </form>
+  {% endif %}
 </section>
 
 <div class="grid-2">

@@ -80,12 +80,19 @@ def write_acl() -> None:
         "# File generato dal pannello: le modifiche manuali vengono sovrascritte",
         f"user {config.MONITOR_ID}",
         "topic read #",
+        f"topic write +/{config.CONTROL_SUFFIX}",
         "",
     ]
     rows = db.q("SELECT id FROM devices WHERE channel_open=1 ORDER BY id")
     for row in rows:
         dev = row["id"]
-        lines += [f"user {dev}", f"topic write {dev}", f"topic write {dev}/#", ""]
+        lines += [
+            f"user {dev}",
+            f"topic write {dev}",
+            f"topic write {dev}/#",
+            f"topic read {config.control_topic(dev)}",
+            "",
+        ]
     tmp = config.MOSQ_ACL.with_name(f"{config.MOSQ_ACL.name}.{os.getpid()}.tmp")
     tmp.write_text("\n".join(lines) + "\n")
     tmp.chmod(0o600)
@@ -146,6 +153,45 @@ def kick(device_id: str, timeout: float = 5) -> bool:
     except Exception as e:
         print(f"[broker] impossibile scollegare {device_id}: {e}", flush=True)
         return False
+
+
+def publish_control(device_id: str, payload: dict | None, timeout: float = 5) -> bool:
+    """Pubblica (retained, QoS 1) un comando sul topic <id>/control del dispositivo.
+
+    Con payload None cancella il messaggio retained. L'in-out lo riceve appena
+    collegato, anche se al momento della pubblicazione era offline.
+    """
+    import json
+    import os
+
+    import paho.mqtt.client as mqtt
+
+    c = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"__control-{os.getpid()}-{threading.get_ident()}",
+        clean_session=True,
+    )
+    c.tls_set(ca_certs=str(pki.CA_CRT), certfile=str(pki.MONITOR_CRT), keyfile=str(pki.MONITOR_KEY))
+    connected = threading.Event()
+    c.on_connect = lambda *a: connected.set()
+    try:
+        c.connect("localhost", config.BROKER_INTERNAL_PORT, keepalive=10)
+        c.loop_start()
+        if not connected.wait(timeout):
+            return False
+        body = json.dumps(payload) if payload is not None else b""
+        info = c.publish(config.control_topic(device_id), body, qos=1, retain=True)
+        info.wait_for_publish(timeout)
+        return info.is_published()
+    except Exception as e:
+        print(f"[broker] impossibile inviare il comando a {device_id}: {e}", flush=True)
+        return False
+    finally:
+        try:
+            c.disconnect()
+            c.loop_stop()
+        except Exception:
+            pass
 
 
 def apply(kick_devices: list[str] | tuple = ()) -> None:

@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS devices (
     name        TEXT NOT NULL DEFAULT '',
     notes       TEXT NOT NULL DEFAULT '',
     channel_open INTEGER NOT NULL DEFAULT 1, -- 0 = canale chiuso (ACL rimossa, certificato ancora valido)
+    renew_requested_at TEXT,                 -- nuovo certificato richiesto all'in-out dal pannello
     created_at  TEXT NOT NULL,
     last_seen_at TEXT,
     last_ip     TEXT
@@ -107,9 +108,19 @@ def tx():
         raise
 
 
+# Colonne aggiunte dopo la prima versione: (tabella, colonna, definizione)
+MIGRATIONS = [
+    ("devices", "renew_requested_at", "TEXT"),
+]
+
+
 def init():
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn().executescript(SCHEMA)
+    c = conn()
+    c.executescript(SCHEMA)
+    for table, column, decl in MIGRATIONS:
+        if column not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def q(sql: str, *args) -> list:

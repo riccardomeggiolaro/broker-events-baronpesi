@@ -49,6 +49,15 @@ ENROLL_PUBLIC_PORT = _int("ENROLL_PUBLIC_PORT", 8884)
 # Identità interna del pannello (legge tutti i topic). I dispositivi non
 # possono avere un ID che inizia con "_".
 MONITOR_ID = "__monitor__"
+# Topic di comando per ogni in-out (<id>/control): il pannello vi pubblica (retained)
+# la richiesta di un nuovo certificato, l'in-out lo legge appena collegato.
+CONTROL_SUFFIX = "control"
+
+
+def control_topic(device_id: str) -> str:
+    return f"{device_id}/{CONTROL_SUFFIX}"
+
+
 # ID dispositivo = CN del certificato = client ID = topic
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 
