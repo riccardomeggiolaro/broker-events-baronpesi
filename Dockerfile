@@ -19,8 +19,8 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY app ./app
 
 VOLUME /data
-# 8883: MQTT su TLS (in-out)   8080: pannello web (dietro Caddy)
-EXPOSE 8883 8080
+# 8883: MQTT su TLS (in-out)   8884: registrazione automatica in-out (HTTPS)   8080: pannello web (dietro Caddy)
+EXPOSE 8883 8884 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD python -c "import urllib.request,json,sys; s=json.load(urllib.request.urlopen('http://127.0.0.1:8080/healthz')); sys.exit(0 if s['broker'] else 1)"

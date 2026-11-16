@@ -3,7 +3,6 @@ import asyncio
 import hmac
 import json
 import os
-import re
 import shutil
 import threading
 import time
@@ -21,7 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import broker, config, db, ingest, pki
 
 BASE = Path(__file__).parent
-DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
+DEVICE_ID_RE = config.DEVICE_ID_RE
 PAGE_SIZE = 50
 LOCAL_TZ = ZoneInfo(os.environ.get("TZ") or "Europe/Rome")
 
@@ -298,7 +297,8 @@ def _get_device(device_id: str) -> dict:
 @app.get("/devices", response_class=HTMLResponse)
 def devices_page(request: Request, new: str = ""):
     return render(
-        request, "devices.html", devices=_devices_with_state(), prefill=new, default_days=config.CLIENT_CERT_DAYS
+        request, "devices.html", devices=_devices_with_state(), prefill=new, default_days=config.CLIENT_CERT_DAYS,
+        enroll_enabled=config.ENROLL_ENABLED, enroll_port=config.ENROLL_PUBLIC_PORT,
     )
 
 

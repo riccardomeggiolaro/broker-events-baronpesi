@@ -27,8 +27,12 @@
 </section>
 
 <section class="card">
-  <h2>Nuovo dispositivo</h2>
-  <p class="muted small">Viene rilasciato un certificato client firmato dalla CA del broker e aperto il canale:
+  <h2>Nuovo dispositivo (manuale)</h2>
+  {% if enroll_enabled %}
+  <p class="small"><b>Registrazione automatica attiva</b> (porta {{ enroll_port }}): un in-out configurato con l'host del broker
+    riceve da solo il certificato e compare qui con il canale aperto. Per bloccarlo chiudi il canale.</p>
+  {% endif %}
+  <p class="muted small">Con il modulo qui sotto viene rilasciato un certificato client firmato dalla CA del broker e aperto il canale:
     il dispositivo potrà pubblicare solo sul topic uguale al suo ID.</p>
   <form method="post" action="/devices" class="form">
     <label>ID dispositivo (client ID dell'in-out)

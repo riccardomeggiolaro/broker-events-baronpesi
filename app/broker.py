@@ -86,7 +86,7 @@ def write_acl() -> None:
     for row in rows:
         dev = row["id"]
         lines += [f"user {dev}", f"topic write {dev}", f"topic write {dev}/#", ""]
-    tmp = config.MOSQ_ACL.with_suffix(".tmp")
+    tmp = config.MOSQ_ACL.with_name(f"{config.MOSQ_ACL.name}.{os.getpid()}.tmp")
     tmp.write_text("\n".join(lines) + "\n")
     tmp.chmod(0o600)
     tmp.replace(config.MOSQ_ACL)

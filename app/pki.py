@@ -6,6 +6,7 @@ Tutte le chiavi sono ECDSA P-256. La CA firma:
 - un certificato client per ogni dispositivo (CN = ID del dispositivo)
 """
 import io
+import os
 import ipaddress
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -101,16 +102,23 @@ def ensure_ca() -> bool:
     return True
 
 
-def _issue(cn: str, days: int, server_names: list[str] | None = None):
-    """Firma un nuovo certificato. Ritorna (chiave, certificato)."""
+def _issue(cn: str, days: int, server_names: list[str] | None = None, public_key=None):
+    """Firma un nuovo certificato. Ritorna (chiave, certificato).
+
+    Con `public_key` (richiesta CSR del dispositivo) la chiave privata resta sul
+    dispositivo e il valore di ritorno per la chiave è None.
+    """
     ca_key, ca_cert = _load_ca()
-    key = ec.generate_private_key(ec.SECP256R1())
+    key = None
+    if public_key is None:
+        key = ec.generate_private_key(ec.SECP256R1())
+        public_key = key.public_key()
     now = _now()
     builder = (
         x509.CertificateBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)]))
         .issuer_name(ca_cert.subject)
-        .public_key(key.public_key())
+        .public_key(public_key)
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
         .not_valid_after(now + timedelta(days=days))
@@ -123,7 +131,7 @@ def _issue(cn: str, days: int, server_names: list[str] | None = None):
             ),
             critical=True,
         )
-        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(public_key), critical=False)
         .add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False
         )
@@ -187,12 +195,38 @@ def issued_paths(serial: str) -> tuple[Path, Path]:
 
 
 def issue_device_cert(device_id: str, days: int) -> str:
-    """Rilascia un certificato per il dispositivo, lo registra e ritorna il seriale."""
+    """Rilascia un certificato (chiave generata qui) per il dispositivo, lo registra e ritorna il seriale."""
     key, cert = _issue(device_id, days)
     serial = format(cert.serial_number, "x")
     crt_path, key_path = issued_paths(serial)
     _write_key(key_path, key)
     _write_cert(crt_path, cert)
+    _register(device_id, serial, cert)
+    return serial
+
+
+def sign_device_csr(device_id: str, public_key, days: int) -> tuple[str, x509.Certificate]:
+    """Firma la chiave pubblica di una richiesta (CSR) del dispositivo: la chiave privata resta sull'in-out."""
+    _, cert = _issue(device_id, days, public_key=public_key)
+    serial = format(cert.serial_number, "x")
+    _write_cert(issued_paths(serial)[0], cert)
+    _register(device_id, serial, cert)
+    return serial, cert
+
+
+def public_key_der(public_key) -> bytes:
+    return public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+
+
+def issued_public_key(serial: str) -> bytes | None:
+    """Chiave pubblica (DER) di un certificato emesso, None se il file non c'è più."""
+    crt_path = issued_paths(serial)[0]
+    if not crt_path.exists():
+        return None
+    return public_key_der(load_cert(crt_path).public_key())
+
+
+def _register(device_id: str, serial: str, cert: x509.Certificate) -> None:
     db.conn().execute(
         "INSERT INTO certificates(serial, device_id, not_before, not_after, issued_at) VALUES(?,?,?,?,?)",
         (
@@ -203,7 +237,6 @@ def issue_device_cert(device_id: str, days: int) -> str:
             db.now(),
         ),
     )
-    return serial
 
 
 def revoke(serial: str, reason: str = "") -> None:
@@ -249,7 +282,8 @@ def write_crl() -> None:
         )
         builder = builder.add_revoked_certificate(revoked)
     crl = builder.sign(ca_key, hashes.SHA256())
-    tmp = CRL.with_suffix(".tmp")
+    # Nome temporaneo univoco: pannello e servizio di registrazione possono scrivere insieme
+    tmp = CRL.with_name(f"{CRL.name}.{os.getpid()}.tmp")
     tmp.write_bytes(crl.public_bytes(serialization.Encoding.PEM))
     tmp.chmod(0o644)
     tmp.replace(CRL)

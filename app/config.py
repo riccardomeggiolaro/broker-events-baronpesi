@@ -1,5 +1,6 @@
 """Configurazione letta dalle variabili d'ambiente."""
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -35,11 +36,21 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 RETENTION_DAYS = _int("RETENTION_DAYS", 90)
 MAX_MESSAGE_MB = _int("MAX_MESSAGE_MB", 64)
-CLIENT_CERT_DAYS = _int("CLIENT_CERT_DAYS", 3650)
+CLIENT_CERT_DAYS = _int("CLIENT_CERT_DAYS", 365)
+
+# Registrazione automatica degli in-out (servizio HTTPS separato dal pannello).
+# Un in-out senza certificato si presenta con una richiesta CSR e riceve subito
+# il certificato; per bloccarlo si chiude il canale dal pannello.
+ENROLL_ENABLED = os.environ.get("ENROLL_ENABLED", "1") == "1"
+ENROLL_INTERNAL_PORT = 8884
+# Porta pubblicata (solo informativa, il servizio ascolta sempre su 8884)
+ENROLL_PUBLIC_PORT = _int("ENROLL_PUBLIC_PORT", 8884)
 
 # Identità interna del pannello (legge tutti i topic). I dispositivi non
 # possono avere un ID che inizia con "_".
 MONITOR_ID = "__monitor__"
+# ID dispositivo = CN del certificato = client ID = topic
+DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 
 
 def secret_key() -> str:

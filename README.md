@@ -2,15 +2,16 @@
 
 Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello web per:
 
-- **certificati**: CA interna, certificato del server, un certificato client per ogni in-out (zip pronto da caricare), rinnovo e revoca;
+- **registrazione automatica**: l'in-out si configura solo con l'host del broker, genera la sua chiave e riceve da solo il certificato client, che rinnova prima della scadenza;
+- **certificati**: CA interna, certificato del server, un certificato client per ogni in-out, rinnovo e revoca (anche manuali, con zip pronto da caricare);
 - **canali**: ogni dispositivo può pubblicare solo sul proprio topic; il canale si può chiudere e riaprire senza toccare l'in-out;
 - **monitor live**: messaggi e connessioni in tempo reale;
 - **storico**: ogni pesata viene archiviata con foto, PDF e CSV, consultabile e filtrabile; pulizia automatica dopo `RETENTION_DAYS` giorni;
 - **stato**: dispositivi online/offline, eventi di connessione, tentativi rifiutati, log di Mosquitto.
 
 ```
- in-out ──MQTT/TLS 8883 (certificato client)──▶ ┌──────────── container "broker" ────────────┐
-                                                │ Mosquitto ◀── ACL/CRL/SIGHUP ── pannello   │
+ in-out ──HTTPS 8884 (registrazione, CSR)────▶ ┌──────────── container "broker" ────────────┐
+ in-out ──MQTT/TLS 8883 (certificato client)──▶ │ Mosquitto ◀── ACL/CRL/SIGHUP ── pannello   │
  browser ──HTTPS 443──▶ Caddy ──▶ 8080 ───────▶ │            ──▶ subscriber "#" ──▶ SQLite   │
                                                 │                                + allegati  │
                                                 └────────────── volume /data ────────────────┘
@@ -18,7 +19,7 @@ Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello
 
 ## Avvio
 
-Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443** e **8883** aperte.
+Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443**, **8883** e **8884** aperte.
 
 ```bash
 cp .env.example .env
@@ -50,17 +51,32 @@ Nel `.env`: `BROKER_HOST=192.168.1.50` (l'IP del PC), `ADMIN_PASSWORD=...`, `SES
 docker compose -f docker-compose.lan.yml up -d --build
 ```
 
-Pannello: `http://192.168.1.50:8080`. Negli in-out: host `192.168.1.50`, porta `8883`.
+Pannello: `http://192.168.1.50:8080`. Negli in-out: host `192.168.1.50` (porte `8883` e `8884`).
 
-## Collegare un in-out
+## Collegare un in-out (registrazione automatica)
 
-1. Sull'in-out apri la configurazione del broker e copia il **Client ID / topic** (es. `in-out-impianto-1a2b3c4d`).
-2. Nel pannello: **Dispositivi → Nuovo dispositivo**, incolla l'ID, dai un nome e crea. Scarica lo **zip dei certificati**.
-3. Sull'in-out imposta:
-   - Host: `BROKER_HOST`, porta `8883`
-   - username e password vuoti
-   - Certificato CA: `ca.crt`, certificato client: `client.crt`, chiave client: `client.key` (dallo zip)
-4. Il dispositivo appare **online** e le pesate arrivano nel monitor live e nello storico.
+Sull'in-out, nella pagina **Broker MQTT**, imposta solo:
+
+- Host: `BROKER_HOST` (lo stesso nome o IP presente nel certificato del server)
+- Porta MQTT: `8883`, porta registrazione: `8884`
+
+Al salvataggio l'in-out:
+
+1. scarica la CA del broker da `https://BROKER_HOST:8884/ca.crt` e la salva (**fiducia al primo contatto**): da quel momento verifica sempre quella;
+2. genera la sua chiave privata (EC P-256, non lascia mai l'in-out) e invia una richiesta CSR con il suo client ID;
+3. riceve subito il certificato (validità `CLIENT_CERT_DAYS`, default 365 giorni) e si collega su `8883`.
+
+Nel pannello il dispositivo compare da solo con il **canale aperto**. L'in-out controlla la scadenza ogni ora e rinnova il certificato (con la stessa chiave) quando mancano meno di 60 giorni.
+
+| Situazione | Risposta del servizio di registrazione |
+|---|---|
+| dispositivo nuovo | certificato rilasciato, dispositivo creato con canale aperto |
+| stessa chiave di un certificato valido | rinnovo: quello in uso resta valido fino alla scadenza, i precedenti vengono revocati |
+| canale chiuso | rifiutata: **per bloccare un in-out chiudi il canale** |
+| chiave di un certificato revocato dall'amministratore | rifiutata: l'in-out genera una nuova chiave e riprova |
+| altra chiave, ma il dispositivo ha già un certificato valido (es. in-out reinstallato) | rifiutata: revoca il vecchio certificato dal pannello e l'in-out si registra da solo al tentativo successivo (ogni 30 s) |
+
+Con `ENROLL_ENABLED=0` la registrazione automatica è disattivata e i certificati si rilasciano a mano dal pannello (**Dispositivi → Nuovo dispositivo**, zip con `ca.crt`, `client.crt`, `client.key`).
 
 L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scrivere solo sul topic `<ID>` (e `<ID>/#`). Nessun dispositivo può leggere i messaggi degli altri.
 
@@ -84,7 +100,9 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 | `SESSION_HTTPS_ONLY` | `1` | Cookie di sessione solo su HTTPS |
 | `RETENTION_DAYS` | `90` | Giorni di conservazione di messaggi ed eventi (`0` = per sempre) |
 | `MAX_MESSAGE_MB` | `64` | Dimensione massima di un messaggio |
-| `CLIENT_CERT_DAYS` | `3650` | Validità predefinita dei certificati client |
+| `CLIENT_CERT_DAYS` | `365` | Validità dei certificati client (gli in-out li rinnovano da soli) |
+| `ENROLL_ENABLED` | `1` | Registrazione automatica degli in-out sulla porta 8884 |
+| `ENROLL_PUBLIC_PORT` | `8884` | Porta di registrazione pubblicata |
 | `TZ` | `Europe/Rome` | Fuso orario per le date nel pannello |
 
 Se cambi `BROKER_HOST`, il certificato del server viene rigenerato al riavvio. I certificati client restano validi, perché la CA non cambia.
@@ -114,6 +132,7 @@ app/
   pki.py       CA, certificati, CRL, zip per gli in-out
   broker.py    mosquitto.conf, ACL, ricarica, scollegamento, lettura del log (stato online)
   ingest.py    subscriber MQTT interno che archivia i messaggi, pulizia dello storico
+  enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)
   db.py        schema SQLite
-docker/        entrypoint e supervisord (Mosquitto + pannello nello stesso container)
+docker/        entrypoint e supervisord (Mosquitto, pannello e registrazione nello stesso container)
 ```
