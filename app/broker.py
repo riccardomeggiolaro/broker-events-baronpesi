@@ -81,6 +81,7 @@ def write_acl() -> None:
         f"user {config.MONITOR_ID}",
         "topic read #",
         f"topic write +/{config.CONTROL_SUFFIX}",
+        f"topic write +/{config.TUNNEL_REQ_SUFFIX}",
         "",
     ]
     rows = db.q("SELECT id FROM devices WHERE channel_open=1 ORDER BY id")
@@ -91,6 +92,7 @@ def write_acl() -> None:
             f"topic write {dev}",
             f"topic write {dev}/#",
             f"topic read {config.control_topic(dev)}",
+            f"topic read {config.tunnel_req_topic(dev)}",
             "",
         ]
     tmp = config.MOSQ_ACL.with_name(f"{config.MOSQ_ACL.name}.{os.getpid()}.tmp")

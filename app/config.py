@@ -58,6 +58,33 @@ def control_topic(device_id: str) -> str:
     return f"{device_id}/{CONTROL_SUFFIX}"
 
 
+# Accesso remoto all'in-out: richieste HTTP/websocket inoltrate attraverso la
+# connessione MQTT (il pannello scrive su <id>/tunnel/req, l'in-out risponde su
+# <id>/tunnel/res). Il proxy risponde su una porta dedicata, così l'interfaccia
+# dell'in-out funziona dalla radice "/" come in rete locale.
+TUNNEL_PREFIX = "tunnel"
+TUNNEL_REQ_SUFFIX = f"{TUNNEL_PREFIX}/req"
+TUNNEL_RES_SUFFIX = f"{TUNNEL_PREFIX}/res"
+REMOTE_ENABLED = os.environ.get("REMOTE_ENABLED", "1") == "1"
+REMOTE_INTERNAL_PORT = 8081
+# Porta pubblicata del proxy remoto (con Caddy in HTTPS, in LAN in HTTP)
+REMOTE_PUBLIC_PORT = _int("REMOTE_PUBLIC_PORT", 8443)
+# Porta del pannello in HTTP (installazione in LAN), per i collegamenti dal proxy al pannello
+WEB_PORT = _int("WEB_PORT", 8080)
+# Tempo massimo di attesa della risposta dell'in-out (secondi)
+REMOTE_TIMEOUT = _int("REMOTE_TIMEOUT", 60)
+# Dimensione massima di una richiesta o risposta inoltrata
+REMOTE_MAX_BYTES = min(32, MAX_MESSAGE_MB) * 1024 * 1024
+
+
+def tunnel_req_topic(device_id: str) -> str:
+    return f"{device_id}/{TUNNEL_REQ_SUFFIX}"
+
+
+def is_tunnel_topic(topic: str) -> bool:
+    return topic.split("/", 1)[-1].startswith(TUNNEL_PREFIX + "/")
+
+
 # ID dispositivo = CN del certificato = client ID = topic
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 

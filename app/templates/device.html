@@ -47,6 +47,23 @@
   </section>
 </div>
 
+{% if remote_url %}
+<section class="card" data-live="remote">
+  <div class="card-head"><h2>Accesso remoto</h2></div>
+  <p class="muted small">Apre l'interfaccia dell'in-out (pagine, API e websocket) attraverso la connessione MQTT,
+    senza aprire porte verso l'impianto. Serve l'in-out collegato e aggiornato a una versione con l'accesso remoto.</p>
+  {% if not device.channel_open %}
+    <p class="small"><span class="badge closed">canale chiuso</span> Apri il canale per collegarti all'in-out.</p>
+  {% elif not online %}
+    <p class="small"><span class="badge off">non collegato</span> L'in-out non è collegato al broker in questo momento.</p>
+  {% endif %}
+  <div class="inline-form">
+    <a class="btn primary" href="{{ remote_url }}" target="_blank" rel="noopener">Apri l'in-out da remoto</a>
+    <span class="muted small">Si apre in una nuova scheda. Una sola sessione remota per browser: aprendone un'altra, la scheda precedente passa al nuovo in-out.</span>
+  </div>
+</section>
+{% endif %}
+
 <section class="card" data-live="certs">
   <div class="card-head"><h2>Certificati</h2></div>
   <p class="muted small">Le chiavi private restano sull'in-out: il broker firma solo la richiesta e rilascia il certificato.</p>

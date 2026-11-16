@@ -7,19 +7,21 @@ Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello
 - **canali**: ogni dispositivo può pubblicare solo sul proprio topic; il canale si può chiudere e riaprire senza toccare l'in-out;
 - **monitor live**: messaggi e connessioni in tempo reale; tutte le pagine del pannello si aggiornano da sole (nuovi dispositivi, stato online, certificati, eventi, messaggi) senza ricaricare;
 - **storico**: ogni pesata viene archiviata con foto, PDF e CSV, consultabile e filtrabile; pulizia automatica dopo `RETENTION_DAYS` giorni;
-- **stato**: dispositivi online/offline, eventi di connessione, tentativi rifiutati, log di Mosquitto.
+- **stato**: dispositivi online/offline, eventi di connessione, tentativi rifiutati, log di Mosquitto;
+- **accesso remoto**: dal pannello si apre l'interfaccia dell'in-out (pagine, API REST e websocket) attraverso la connessione MQTT, senza aprire porte verso l'impianto.
 
 ```
  in-out ──HTTPS 8884 (registrazione, CSR)────▶ ┌──────────── container "broker" ────────────┐
  in-out ──MQTT/TLS 8883 (certificato client)──▶ │ Mosquitto ◀── ACL/CRL/SIGHUP ── pannello   │
  browser ──HTTPS 443──▶ Caddy ──▶ 8080 ───────▶ │            ──▶ subscriber "#" ──▶ SQLite   │
+ browser ──HTTPS 8443─▶ Caddy ──▶ 8081 ───────▶ │ proxy remoto ◀─▶ <ID>/tunnel/req|res ◀─▶ in-out│
                                                 │                                + allegati  │
                                                 └────────────── volume /data ────────────────┘
 ```
 
 ## Avvio
 
-Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443**, **8883** e **8884** aperte.
+Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443**, **8883**, **8884** e **8443** (accesso remoto agli in-out) aperte.
 
 ```bash
 cp .env.example .env
@@ -51,7 +53,7 @@ Nel `.env`: `BROKER_HOST=192.168.1.50` (l'IP del PC), `ADMIN_PASSWORD=...`, `SES
 docker compose -f docker-compose.lan.yml up -d --build
 ```
 
-Pannello: `http://192.168.1.50:8080`. Negli in-out: host `192.168.1.50` (porte `8883` e `8884`).
+Pannello: `http://192.168.1.50:8080`, accesso remoto agli in-out su `http://192.168.1.50:8443`. Negli in-out: host `192.168.1.50` (porte `8883` e `8884`).
 
 ## Collegare un in-out (registrazione automatica)
 
@@ -91,6 +93,24 @@ La registrazione automatica è l'unico modo per rilasciare i certificati: il pan
 
 L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scrivere solo sul topic `<ID>` (e `<ID>/#`) e di leggere solo i comandi su `<ID>/control`. Nessun dispositivo può leggere i messaggi degli altri.
 
+## Accesso remoto all'in-out
+
+Nella pagina del dispositivo, **Apri l'in-out da remoto** apre in una nuova scheda l'interfaccia web dell'in-out, come se fossi in rete locale: pagine, chiamate alle API REST e websocket (pesi in tempo reale, log…). Non serve aprire porte verso l'impianto: tutto passa nella connessione MQTT/TLS che l'in-out tiene già aperta.
+
+```
+browser ──▶ https://BROKER_HOST:8443/... ──▶ proxy remoto ──MQTT <ID>/tunnel/req──▶ in-out ──▶ http://127.0.0.1:<porta API>
+        ◀──────────────────────────────────────────────────MQTT <ID>/tunnel/res◀──
+```
+
+- **Porta dedicata** (`REMOTE_PUBLIC_PORT`, default `8443`): l'interfaccia dell'in-out usa percorsi assoluti (`/api`, `/static`, websocket su `location.host`), quindi deve rispondere dalla radice `/`. Con Caddy è in HTTPS con lo stesso certificato del pannello; in LAN è in HTTP.
+- **Accesso**: serve il login del pannello (lo stesso cookie di sessione, verificato anche sulla 8443). Poi l'in-out chiede il suo login come sempre.
+- **Un in-out alla volta per browser**: l'in-out scelto è salvato in un cookie; aprendone un altro, le schede già aperte passano al nuovo.
+- I cookie del pannello non vengono mai inoltrati all'in-out. Ogni apertura è registrata negli eventi del dispositivo.
+- Limiti: richieste e risposte fino a 32 MB (e comunque entro `MAX_MESSAGE_MB`), attesa massima `REMOTE_TIMEOUT` secondi. Le risposte in streaming (download progressivi, SSE) arrivano solo quando sono complete.
+- Serve l'in-out aggiornato alla versione con l'accesso remoto (modulo `remote_tunnel`). Sull'in-out si può disattivare con `app_api.message_broker.remote_access = false` in `config.json`.
+
+Il canale deve essere aperto: l'ACL permette all'in-out di leggere `<ID>/tunnel/req` e di rispondere su `<ID>/tunnel/res`; il pannello è l'unico che può scrivere sulle richieste. Questi messaggi non finiscono nello storico.
+
 ## Canali, revoca e pesate in coda
 
 Con MQTT 3.1.1 Mosquitto conferma (PUBACK) anche i messaggi negati dall'ACL: bloccare un dispositivo solo con l'ACL farebbe perdere le pesate. Per questo:
@@ -114,6 +134,9 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 | `CLIENT_CERT_DAYS` | `365` | Validità dei certificati client (gli in-out li rinnovano da soli) |
 | `ENROLL_ENABLED` | `1` | Registrazione automatica degli in-out sulla porta 8884 |
 | `ENROLL_PUBLIC_PORT` | `8884` | Porta di registrazione pubblicata |
+| `REMOTE_ENABLED` | `1` | Pulsante di accesso remoto agli in-out nel pannello |
+| `REMOTE_PUBLIC_PORT` | `8443` | Porta dell'accesso remoto (HTTPS con Caddy, HTTP in LAN) |
+| `REMOTE_TIMEOUT` | `60` | Secondi di attesa della risposta dell'in-out |
 | `TZ` | `Europe/Rome` | Fuso orario per le date nel pannello |
 
 Se cambi `BROKER_HOST`, il certificato del server viene rigenerato al riavvio. I certificati client restano validi, perché la CA non cambia.
@@ -144,6 +167,8 @@ app/
   broker.py    mosquitto.conf, ACL, ricarica, scollegamento, lettura del log (stato online)
   ingest.py    subscriber MQTT interno che archivia i messaggi, pulizia dello storico
   enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)
+  remote.py    accesso remoto all'in-out: proxy HTTP/websocket sulla porta 8081 (8443 tramite Caddy)
+  tunnel.py    protocollo del tunnel su MQTT (<ID>/tunnel/req e <ID>/tunnel/res)
   db.py        schema SQLite
 docker/        entrypoint e supervisord (Mosquitto, pannello e registrazione nello stesso container)
 ```

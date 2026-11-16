@@ -2,6 +2,7 @@
 #   cp .env.example .env   (BROKER_HOST = IP del PC, SESSION_HTTPS_ONLY=0)
 #   docker compose -f docker-compose.lan.yml up -d --build
 # Pannello: http://<IP>:8080   MQTT/TLS per gli in-out: <IP>:8883   registrazione in-out: <IP>:8884
+# Accesso remoto agli in-out (dal pannello): http://<IP>:8443
 services:
   broker:
     build: .
@@ -13,6 +14,7 @@ services:
       - "${BROKER_PUBLIC_PORT:-8883}:8883"
       - "${ENROLL_PUBLIC_PORT:-8884}:8884"
       - "${WEB_PORT:-8080}:8080"
+      - "${REMOTE_PUBLIC_PORT:-8443}:8081"
     volumes:
       - broker_data:/data
     logging:
