@@ -5,6 +5,10 @@ mai il dispositivo) e invia una richiesta CSR con il proprio client ID. Il
 broker firma subito la richiesta, crea il dispositivo con il canale aperto e
 ricarica Mosquitto: l'in-out può collegarsi sulla porta MQTT 8883.
 
+Il servizio pubblica anche la CRL (/crl.pem): se la connessione MQTT viene
+rifiutata, l'in-out la consulta e, se il suo certificato è stato revocato (es.
+dispositivo eliminato dal pannello), si registra di nuovo da solo.
+
 Il servizio usa il certificato del server Mosquitto (firmato dalla CA interna).
 Al primo contatto l'in-out scarica la CA da /ca.crt senza verificarla (fiducia
 al primo contatto), poi la usa per verificare il servizio e il broker.
@@ -85,6 +89,13 @@ def healthz():
 @app.get("/ca.crt")
 def ca_crt():
     return Response(pki.CA_CRT.read_bytes(), media_type="application/x-pem-file")
+
+
+@app.get("/crl.pem")
+def crl_pem():
+    """CRL firmata dalla CA: l'in-out la usa per capire se il suo certificato è stato
+    revocato (deve registrarsi di nuovo) o sospeso (canale chiuso: deve aspettare)."""
+    return Response(pki.CRL.read_bytes(), media_type="application/x-pem-file")
 
 
 @app.post("/enroll")

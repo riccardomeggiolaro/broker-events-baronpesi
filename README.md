@@ -73,6 +73,7 @@ Nel pannello il dispositivo compare da solo con il **canale aperto**. L'in-out c
 | dispositivo nuovo | certificato rilasciato, dispositivo creato con canale aperto |
 | stessa chiave di un certificato valido | rinnovo: quello in uso resta valido fino alla scadenza, i precedenti vengono revocati |
 | canale chiuso | rifiutata: **per bloccare un in-out chiudi il canale** |
+| dispositivo eliminato o certificato revocato dal pannello | l'in-out, rifiutato da Mosquitto, controlla la CRL (`https://BROKER_HOST:8884/crl.pem`), elimina il certificato e si registra di nuovo da solo (con il canale chiuso invece aspetta) |
 | chiave di un certificato revocato dall'amministratore | rifiutata: l'in-out genera una nuova chiave e riprova |
 | altra chiave, ma il dispositivo ha già un certificato valido (es. in-out reinstallato) | rifiutata: revoca il vecchio certificato dal pannello e l'in-out si registra da solo al tentativo successivo (ogni 30 s) |
 
