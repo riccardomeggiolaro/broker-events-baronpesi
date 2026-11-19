@@ -39,6 +39,22 @@
   </section>
 </div>
 
+{% if ssh_enabled %}
+<section class="card">
+  <div class="card-head"><h2>Chiave SSH del terminale</h2><a class="btn small" href="/broker/ssh-key.pub">Scarica la chiave pubblica</a></div>
+  <dl class="kv">
+    <dt>Impronta</dt><dd class="mono tiny">{{ ssh_fingerprint }}</dd>
+    <dt>Creata il</dt><dd>{{ ssh_key_created|dt }}</dd>
+  </dl>
+  <p class="muted small">Con questa chiave il pannello apre il terminale sugli in-out. La privata resta nel volume dati (<code>/data/ssh</code>);
+    gli in-out installano da soli la pubblica, valida solo per le connessioni dal tunnel. Se la rigeneri, ogni in-out sostituisce la vecchia
+    alla prossima apertura del terminale: chi ha copiato la vecchia chiave privata non può più usarla.</p>
+  <form method="post" action="/broker/ssh-key/regenerate" data-confirm="Creare una nuova chiave SSH? La vecchia smette di essere usata subito e viene sostituita su ogni in-out alla prossima apertura del terminale.">
+    <button class="btn warn">Rigenera chiave SSH</button>
+  </form>
+</section>
+{% endif %}
+
 <section class="card" data-live="revoked">
   <h2>Certificati revocati</h2>
   <div class="table-wrap">

@@ -71,6 +71,32 @@
 </section>
 {% endif %}
 
+{% if ssh_sessions %}
+<section class="card" data-live="ssh-sessions">
+  <h2>Sessioni del terminale</h2>
+  <p class="muted small">Tutto quello che è comparso nel terminale, comandi compresi. Si rivedono con <code>less -R</code>; restano {{ retention_days }} giorni.</p>
+  <div class="table-wrap">
+  <table class="table compact">
+    <thead><tr><th>Sessione</th><th class="num">Dimensione</th><th></th></tr></thead>
+    <tbody>
+    {% for r in ssh_sessions %}
+      <tr><td>{{ r.header }}</td><td class="num nowrap">{{ r.size|size }}</td>
+        <td><a class="btn small" href="/devices/{{ device.id }}/ssh-sessions/{{ r.name }}">Scarica</a></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+{% if info_url %}
+<section class="card" id="machine" data-info-url="{{ info_url }}">
+  <div class="card-head"><h2>Macchina</h2><button type="button" class="btn small" id="machine-refresh">Aggiorna</button></div>
+  <p class="muted small" id="machine-state">Lettura dello stato dall'in-out…</p>
+  <dl class="kv" id="machine-kv" hidden></dl>
+</section>
+{% endif %}
+
 <section class="card" data-live="certs">
   <div class="card-head"><h2>Certificati</h2></div>
   <p class="muted small">Le chiavi private restano sull'in-out: il broker firma solo la richiesta e rilascia il certificato.</p>
@@ -136,3 +162,4 @@
   </form>
 </section>
 {% endblock %}
+{% block scripts %}<script src="/static/device.js?v={{ static_v }}"></script>{% endblock %}

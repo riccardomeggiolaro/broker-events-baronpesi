@@ -81,6 +81,14 @@ REMOTE_MAX_BYTES = min(32, MAX_MESSAGE_MB) * 1024 * 1024
 # La chiave SSH del broker viene creata al primo uso in DATA_DIR/ssh.
 SSH_ENABLED = os.environ.get("SSH_ENABLED", "1") == "1"
 SSH_DIR = DATA_DIR / "ssh"
+# Registrazione delle sessioni del terminale (tutto quello che compare a schermo, comandi compresi)
+SSH_RECORD = os.environ.get("SSH_RECORD", "1") == "1"
+SSH_RECORD_DIR = DATA_DIR / "ssh-sessions"
+SSH_RECORD_MAX_BYTES = _int("SSH_RECORD_MAX_MB", 20) * 1024 * 1024
+# Trasferimento file (SFTP) dalla pagina del terminale: dimensione massima di un file
+SFTP_MAX_BYTES = _int("SFTP_MAX_MB", 200) * 1024 * 1024
+# Chiusura automatica di un terminale senza tasti premuti per questi minuti (0 = mai)
+SSH_IDLE_MINUTES = _int("SSH_IDLE_MINUTES", 30)
 
 
 def tunnel_req_topic(device_id: str) -> str:

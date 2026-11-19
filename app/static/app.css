@@ -130,6 +130,7 @@ tr.flash-new td { animation: flashrow 1.6s ease-out; }
 .badge.on { background: var(--ok-bg); color: var(--ok); }
 .badge.off { background: var(--idle-bg); color: var(--muted); }
 .badge.closed { background: var(--bad-bg); color: var(--bad); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
 .badge.on::before { content: "● "; }
 .big-state .badge { font-size: 14px; padding: 4px 12px; }
 .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; background: var(--idle-bg); color: var(--muted); }
