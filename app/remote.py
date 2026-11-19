@@ -16,6 +16,10 @@ L'interfaccia dell'in-out usa percorsi assoluti (/api, /static, /login...), quin
   per i websocket senza prefisso vale l'ultimo in-out aperto (cookie);
 - redirect (Location) e cookie (Path) dell'in-out ricevono il prefisso.
 
+Terminale SSH: `/__remote/terminal/<id>` apre una pagina con un terminale (xterm.js) collegato
+al websocket `/__remote/ssh/<id>`; il proxy fa da client SSH verso l'in-out attraverso lo
+stesso tunnel MQTT (vedi `ssh.py`).
+
 Accesso: serve il login del pannello. Il cookie di sessione del pannello vale anche su
 questa porta (i cookie non distinguono le porte) e viene verificato con la stessa chiave.
 I cookie del pannello non vengono mai inoltrati all'in-out.
@@ -34,10 +38,14 @@ import itsdangerous
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
-from starlette.routing import Route, WebSocketRoute
+from starlette.routing import Mount, Route, WebSocketRoute
+from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+import asyncssh
+
 from . import config, db
+from .ssh import SSHSessionError, TunnelSSH
 from .tunnel import Tunnel
 
 SESSION_COOKIE = "broker_session"
@@ -59,7 +67,8 @@ WS_SKIP = HOP_BY_HOP | {
     "sec-websocket-extensions", "sec-websocket-protocol", "sec-websocket-accept",
 }
 
-SHIM_JS = (Path(__file__).parent / "static" / "remote-shim.js").read_text(encoding="utf-8")
+STATIC_DIR = Path(__file__).parent / "static"
+SHIM_JS = (STATIC_DIR / "remote-shim.js").read_text(encoding="utf-8")
 RE_HEAD = re.compile(rb"<head\b[^>]*>", re.IGNORECASE)
 # Letture di location.pathname (non le assegnazioni): diventano il percorso senza prefisso
 RE_PATHNAME = re.compile(rb"(?<![\w$.])(?:(?:window|document|self)\.)?location\.pathname\b(?!\s*=(?!=))")
@@ -422,6 +431,148 @@ async def proxy_ws(ws: WebSocket):
         tunnel.close_session(sid)
 
 
+# ----------------------------------------------------------------------
+# Terminale SSH
+# ----------------------------------------------------------------------
+def _same_origin(conn) -> bool:
+    """Websocket solo dalle pagine di questo stesso indirizzo (niente siti esterni con il cookie)."""
+    origin = conn.headers.get("origin")
+    if not origin:
+        return False
+    try:
+        return urlsplit(origin).netloc == conn.headers.get("host")
+    except ValueError:
+        return False
+
+
+def _term_size(value: str | None, default: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(high, int(value or default)))
+    except ValueError:
+        return default
+
+
+async def terminal_page(request: Request):
+    device_id = request.path_params["device_id"]
+    if not _logged_in(request):
+        return RedirectResponse(f"{_panel_url(request)}/login", status_code=303)
+    if not config.REMOTE_ENABLED or not config.SSH_ENABLED:
+        return _page(request, "Terminale disattivato",
+                     "Imposta <code>REMOTE_ENABLED=1</code> e <code>SSH_ENABLED=1</code> nel file .env del broker.", 403)
+    device = _device_by_id(device_id)
+    if not device:
+        return _page(request, "In-out non trovato", f"Il dispositivo <b>{html.escape(device_id)}</b> non esiste.", 404)
+    name = device["name"] or device["id"]
+    panel = f"{_panel_url(request)}/devices/{quote(device['id'])}"
+    data = json.dumps({"device": device["id"], "name": name, "panel": panel}).replace("<", "\\u003c")
+    v = int((STATIC_DIR / "terminal.js").stat().st_mtime)
+    body = f"""<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terminale · {html.escape(name)}</title>
+<link rel="icon" type="image/png" href="/__remote/static/favicon.png">
+<link rel="stylesheet" href="/__remote/static/xterm/xterm.css?v={v}">
+<link rel="stylesheet" href="/__remote/static/terminal.css?v={v}">
+</head><body>
+<header class="bar">
+  <div class="who"><span class="dot" id="dot"></span><strong>{html.escape(name)}</strong>
+    <span class="muted" id="state">Collegamento…</span></div>
+  <div class="actions">
+    <button type="button" id="reconnect" hidden>Riconnetti</button>
+    <a href="{html.escape(panel)}">Pannello</a>
+  </div>
+</header>
+<div id="term"></div>
+<script>window.__terminal={data};</script>
+<script src="/__remote/static/xterm/xterm.js?v={v}"></script>
+<script src="/__remote/static/xterm/addon-fit.js?v={v}"></script>
+<script src="/__remote/static/terminal.js?v={v}"></script>
+</body></html>"""
+    return HTMLResponse(body, headers={"Cache-Control": "no-store"})
+
+
+async def ssh_ws(ws: WebSocket):
+    if not _logged_in(ws) or not _same_origin(ws):
+        await ws.close(code=4401)
+        return
+    if not config.SSH_ENABLED:
+        await ws.close(code=4403)
+        return
+    device = _device_by_id(ws.path_params["device_id"])
+    if device is None:
+        await ws.close(code=4404)
+        return
+    await ws.accept()
+
+    async def notify(kind: str, message: str = "", **extra) -> None:
+        await ws.send_text(json.dumps({"type": kind, "message": message, **extra}))
+
+    if not device["channel_open"]:
+        await notify("error", "Canale chiuso: l'in-out non è collegato al broker finché il canale è chiuso.")
+        await ws.close(code=1000)
+        return
+
+    cols = _term_size(ws.query_params.get("cols"), 80, 10, 500)
+    rows = _term_size(ws.query_params.get("rows"), 24, 5, 200)
+    session = TunnelSSH(tunnel, device["id"])
+    try:
+        await notify("status", "Apertura della connessione SSH…")
+        try:
+            conn = await session.open()
+            proc = await conn.create_process(
+                term_type="xterm-256color", term_size=(cols, rows), encoding=None, stderr=asyncssh.STDOUT,
+            )
+        except SSHSessionError as e:
+            await notify("error", str(e))
+            await ws.close(code=1000)
+            return
+        except (OSError, asyncssh.Error) as e:
+            await notify("error", f"apertura della shell non riuscita: {e}")
+            await ws.close(code=1000)
+            return
+        with db.tx():
+            db.add_event("admin", device["id"], f"aperto il terminale SSH remoto (utente {session.user})")
+        await notify("ready", user=session.user)
+
+        async def browser_to_ssh():
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    return
+                if msg.get("bytes") is not None:
+                    proc.stdin.write(msg["bytes"])
+                elif msg.get("text"):
+                    try:
+                        ctrl = json.loads(msg["text"])
+                    except ValueError:
+                        continue
+                    if isinstance(ctrl, dict) and ctrl.get("type") == "resize":
+                        proc.change_terminal_size(
+                            _term_size(str(ctrl.get("cols")), cols, 10, 500),
+                            _term_size(str(ctrl.get("rows")), rows, 5, 200),
+                        )
+
+        async def ssh_to_browser():
+            while True:
+                data = await proc.stdout.read(32 * 1024)
+                if not data:
+                    await notify("exit", "Sessione terminata.")
+                    await ws.close(code=1000)
+                    return
+                await ws.send_bytes(data)
+
+        tasks = [asyncio.create_task(browser_to_ssh()), asyncio.create_task(ssh_to_browser())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        await session.close()
+
+
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 app = Starlette(
@@ -429,6 +580,9 @@ app = Starlette(
     routes=[
         Route(RESERVED + "open/{device_id}", open_device, methods=["GET"]),
         Route(RESERVED + "status", remote_status, methods=["GET"]),
+        Route(RESERVED + "terminal/{device_id}", terminal_page, methods=["GET"]),
+        WebSocketRoute(RESERVED + "ssh/{device_id}", ssh_ws),
+        Mount(RESERVED + "static", StaticFiles(directory=STATIC_DIR), name="static"),
         Route("/{path:path}", proxy_http, methods=METHODS),
         WebSocketRoute("/{path:path}", proxy_ws),
     ],

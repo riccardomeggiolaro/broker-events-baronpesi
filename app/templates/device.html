@@ -61,6 +61,13 @@
     <a class="btn primary" href="{{ remote_url }}" target="_blank" rel="noopener">Apri l'in-out da remoto</a>
     <span class="muted small">Si apre in una nuova scheda all'indirizzo <code>/{{ device.id }}/</code>: puoi tenere aperti più in-out insieme, ognuno con il suo login.</span>
   </div>
+  {% if terminal_url %}
+  <div class="inline-form">
+    <a class="btn" href="{{ terminal_url }}" target="_blank" rel="noopener">Apri il terminale SSH</a>
+    <span class="muted small">Shell sull'in-out attraverso lo stesso canale, senza password: l'in-out installa da solo
+      la chiave del broker per l'utente scelto nelle sue impostazioni (solo in-out Linux, con sshd attivo).</span>
+  </div>
+  {% endif %}
 </section>
 {% endif %}
 

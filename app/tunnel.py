@@ -13,6 +13,8 @@ Ogni messaggio MQTT è: intestazione JSON su una riga, "\\n", corpo binario.
     {"t":"ws_msg","id","bin"} + dati           {"t":"ws_msg","id","bin"} + dati
     {"t":"ws_close","id","code"}               {"t":"ws_close","id","code"}
 
+Sullo stesso canale passa il terminale SSH (messaggi ssh_open/ssh_data/ssh_close, vedi `ssh.py`).
+
 Si usa QoS 0: sulla stessa connessione TCP i messaggi arrivano in ordine e, se la
 connessione cade, le richieste in corso falliscono comunque per timeout.
 """
@@ -107,11 +109,11 @@ class Tunnel:
         if not sid or self._owner.get(sid) != device_id:
             return
         kind = header.get("t")
-        if kind in ("http", "ws_open"):
+        if kind in ("http", "ws_open", "ssh_open"):
             fut = self._waiters.pop(sid, None)
             if fut is not None and not fut.done():
                 fut.set_result((header, body))
-        elif kind in ("ws_msg", "ws_close"):
+        elif kind in ("ws_msg", "ws_close", "ssh_data", "ssh_close"):
             q = self._sockets.get(sid)
             if q is not None:
                 q.put_nowait((header, body))
