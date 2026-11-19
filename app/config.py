@@ -77,6 +77,12 @@ REMOTE_TIMEOUT = _int("REMOTE_TIMEOUT", 60)
 REMOTE_MAX_BYTES = min(32, MAX_MESSAGE_MB) * 1024 * 1024
 
 
+# Terminale SSH verso gli in-out dal pannello (attraverso lo stesso tunnel MQTT).
+# La chiave SSH del broker viene creata al primo uso in DATA_DIR/ssh.
+SSH_ENABLED = os.environ.get("SSH_ENABLED", "1") == "1"
+SSH_DIR = DATA_DIR / "ssh"
+
+
 def tunnel_req_topic(device_id: str) -> str:
     return f"{device_id}/{TUNNEL_REQ_SUFFIX}"
 

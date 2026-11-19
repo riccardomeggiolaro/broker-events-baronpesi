@@ -8,7 +8,8 @@ Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello
 - **monitor live**: messaggi e connessioni in tempo reale; tutte le pagine del pannello si aggiornano da sole (nuovi dispositivi, stato online, certificati, eventi, messaggi) senza ricaricare;
 - **storico**: ogni pesata viene archiviata con foto, PDF e CSV, consultabile e filtrabile; pulizia automatica dopo `RETENTION_DAYS` giorni;
 - **stato**: dispositivi online/offline, eventi di connessione, tentativi rifiutati, log di Mosquitto;
-- **accesso remoto**: dal pannello si apre l'interfaccia dell'in-out (pagine, API REST e websocket) attraverso la connessione MQTT, senza aprire porte verso l'impianto.
+- **accesso remoto**: dal pannello si apre l'interfaccia dell'in-out (pagine, API REST e websocket) attraverso la connessione MQTT, senza aprire porte verso l'impianto;
+- **terminale SSH**: per ogni in-out un terminale nel browser, sempre attraverso la connessione MQTT, con accesso a chiave senza password.
 
 ```
  in-out ──HTTPS 8884 (registrazione, CSR)────▶ ┌──────────── container "broker" ────────────┐
@@ -116,6 +117,22 @@ browser ──▶ https://BROKER_HOST:8443/<ID>/... ──▶ proxy remoto ─�
 
 Il canale deve essere aperto: l'ACL permette all'in-out di leggere `<ID>/tunnel/req` e di rispondere su `<ID>/tunnel/res`; il pannello è l'unico che può scrivere sulle richieste. Questi messaggi non finiscono nello storico.
 
+## Terminale SSH dell'in-out
+
+Nella pagina del dispositivo, **Apri il terminale SSH** apre in una nuova scheda un terminale (xterm.js) collegato alla shell dell'in-out. Anche l'SSH passa nella connessione MQTT/TLS già aperta dall'in-out: sull'impianto non si apre nessuna porta.
+
+```
+browser ──wss://BROKER_HOST:8443/__remote/ssh/<ID>──▶ proxy remoto (client SSH) ──MQTT <ID>/tunnel/req──▶ in-out ──▶ sshd 127.0.0.1:22
+        ◀── byte del terminale ──────────────────────────────────────────────MQTT <ID>/tunnel/res◀──
+```
+
+- **Un terminale per ogni in-out**: `https://BROKER_HOST:8443/__remote/terminal/<ID>`. Se ne possono aprire più di uno, anche verso in-out diversi, in schede separate.
+- **SSH cifrato da un capo all'altro**: il proxy remoto fa da client SSH (asyncssh) e il tunnel trasporta solo i byte della connessione verso il sshd dell'in-out.
+- **Accesso con chiave, senza password**: il broker ha una sua chiave SSH (`/data/ssh/id_ed25519`, creata al primo uso; la privata non lascia mai il broker). La chiave pubblica viaggia con ogni apertura del terminale: l'in-out la installa da solo in `authorized_keys` dell'utente scelto nelle sue impostazioni, con il vincolo `from="127.0.0.1,::1"`, cioè valida solo per le connessioni arrivate dal tunnel.
+- **Sull'in-out** (pagina Broker MQTT): *Consenti il terminale SSH* (attivo di default; se lo disattivi la chiave viene tolta da `authorized_keys`) e *Utente SSH* (default `root`). Serve un in-out Linux con sshd attivo, che accetti le chiavi: per `root` serve `PermitRootLogin prohibit-password` (il default di Debian e Ubuntu) o `yes`.
+- **Accesso al terminale**: serve il login del pannello; il websocket accetta solo connessioni dalla pagina del terminale (controllo dell'`Origin`). Ogni apertura è registrata negli eventi del dispositivo con l'utente usato.
+- Si disattiva sul broker con `SSH_ENABLED=0`. Se si perde `/data/ssh` il broker crea una nuova chiave e gli in-out la installano alla prossima apertura, sostituendo la vecchia.
+
 ## Canali, revoca e pesate in coda
 
 Con MQTT 3.1.1 Mosquitto conferma (PUBACK) anche i messaggi negati dall'ACL: bloccare un dispositivo solo con l'ACL farebbe perdere le pesate. Per questo:
@@ -142,6 +159,7 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 | `REMOTE_ENABLED` | `1` | Pulsante di accesso remoto agli in-out nel pannello |
 | `REMOTE_PUBLIC_PORT` | `8443` | Porta dell'accesso remoto (HTTPS con Caddy, HTTP in LAN) |
 | `REMOTE_TIMEOUT` | `60` | Secondi di attesa della risposta dell'in-out |
+| `SSH_ENABLED` | `1` | Terminale SSH verso gli in-out nel pannello (richiede `REMOTE_ENABLED=1`) |
 | `TZ` | `Europe/Rome` | Fuso orario per le date nel pannello |
 
 Se cambi `BROKER_HOST`, il certificato del server viene rigenerato al riavvio. I certificati client restano validi, perché la CA non cambia.
@@ -152,6 +170,7 @@ Tutto è nel volume `broker_data` (`/data` nel container):
 
 ```
 /data/pki/            CA (ca.key!), server, certificati emessi, crl.pem
+/data/ssh/            chiave SSH del broker per il terminale degli in-out
 /data/mosquitto/      mosquitto.conf, acl, persistenza, log (generati)
 /data/broker.sqlite3  dispositivi, certificati, messaggi, eventi
 /data/attachments/    foto, PDF e CSV delle pesate
@@ -174,6 +193,8 @@ app/
   enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)
   remote.py    accesso remoto agli in-out su /<ID>/: proxy HTTP/websocket sulla porta 8081 (8443 tramite Caddy)
   tunnel.py    protocollo del tunnel su MQTT (<ID>/tunnel/req e <ID>/tunnel/res)
+  ssh.py       terminale SSH: chiave del broker e connessione SSH trasportata dal tunnel
+  static/xterm/  xterm.js 5.5.0 e addon-fit 0.10.0 (licenza MIT) per la pagina del terminale
   db.py        schema SQLite
 docker/        entrypoint e supervisord (Mosquitto, pannello e registrazione nello stesso container)
 ```

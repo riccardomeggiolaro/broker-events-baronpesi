@@ -323,7 +323,7 @@ def api_status():
 # ----------------------------------------------------------------------
 # Dispositivi e certificati
 # ----------------------------------------------------------------------
-def _remote_url(request: Request, device_id: str) -> str | None:
+def _remote_url(request: Request, device_id: str, page: str = "open") -> str | None:
     """Indirizzo dell'accesso remoto all'in-out: stesso host del pannello, porta dedicata."""
     if not config.REMOTE_ENABLED:
         return None
@@ -331,7 +331,12 @@ def _remote_url(request: Request, device_id: str) -> str | None:
     if ":" in host:
         host = f"[{host}]"
     scheme = "https" if request.url.scheme == "https" else "http"
-    return f"{scheme}://{host}:{config.REMOTE_PUBLIC_PORT}/__remote/open/{quote(device_id, safe='')}"
+    return f"{scheme}://{host}:{config.REMOTE_PUBLIC_PORT}/__remote/{page}/{quote(device_id, safe='')}"
+
+
+def _terminal_url(request: Request, device_id: str) -> str | None:
+    """Terminale SSH verso l'in-out (stesso proxy dell'accesso remoto)."""
+    return _remote_url(request, device_id, "terminal") if config.SSH_ENABLED else None
 
 
 def _get_device(device_id: str) -> dict:
@@ -364,6 +369,7 @@ def device_page(request: Request, device_id: str):
     return render(
         request, "device.html", device=device, online=online, certs=certs, events=events,
         messages=messages, msg_count=count, remote_url=_remote_url(request, device_id),
+        terminal_url=_terminal_url(request, device_id),
     )
 
 

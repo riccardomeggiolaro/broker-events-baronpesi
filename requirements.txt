@@ -6,3 +6,4 @@ python-multipart==0.0.20
 paho-mqtt==2.1.0
 cryptography==44.0.3
 tzdata==2025.2
+asyncssh==2.21.0
