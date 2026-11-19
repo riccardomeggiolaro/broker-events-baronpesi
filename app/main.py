@@ -15,12 +15,12 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import broker, config, db, ingest, pki
+from . import broker, config, db, ingest, pki, ssh, ssh_sessions
 
 BASE = Path(__file__).parent
 DEVICE_ID_RE = config.DEVICE_ID_RE
@@ -370,7 +370,17 @@ def device_page(request: Request, device_id: str):
         request, "device.html", device=device, online=online, certs=certs, events=events,
         messages=messages, msg_count=count, remote_url=_remote_url(request, device_id),
         terminal_url=_terminal_url(request, device_id),
+        info_url=_remote_url(request, device_id, "info"),
+        ssh_sessions=ssh_sessions.list_sessions(device_id) if config.SSH_ENABLED else [],
     )
+
+
+@app.get("/devices/{device_id}/ssh-sessions/{name}")
+def download_ssh_session(device_id: str, name: str):
+    path = ssh_sessions.session_path(device_id, name)
+    if path is None:
+        raise HTTPException(404, "Registrazione non trovata")
+    return FileResponse(path, media_type="text/plain; charset=utf-8", filename=f"{device_id}-{name}")
 
 
 @app.post("/devices/{device_id}/edit")
@@ -603,7 +613,25 @@ def broker_page(request: Request):
         request, "broker.html",
         ca=pki.cert_info(pki.CA_CRT), server=pki.cert_info(pki.SERVER_CRT), server_names=pki.server_names(),
         status=_status(), log=broker.tail_log(300), revoked=revoked,
+        ssh_enabled=config.SSH_ENABLED,
+        ssh_fingerprint=ssh.fingerprint() if config.SSH_ENABLED else None,
+        ssh_key_created=ssh.key_created_at() if config.SSH_ENABLED else None,
     )
+
+
+@app.post("/broker/ssh-key/regenerate")
+def regenerate_ssh_key(request: Request):
+    ssh.regenerate()
+    with db.tx():
+        db.add_event("admin", None, f"rigenerata la chiave SSH del broker ({ssh.fingerprint()})")
+    flash(request, "Nuova chiave SSH creata: ogni in-out sostituisce la vecchia alla prossima apertura del terminale.")
+    return redirect("/broker")
+
+
+@app.get("/broker/ssh-key.pub")
+def download_ssh_public_key():
+    return Response(ssh.public_key() + " in-out-remote-broker\n", media_type="text/plain",
+                    headers={"Content-Disposition": 'attachment; filename="broker-ssh.pub"'})
 
 
 @app.get("/ca.crt")

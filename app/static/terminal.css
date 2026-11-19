@@ -34,5 +34,34 @@ body {
   font: inherit; color: #fff; background: var(--primary); border: 0; border-radius: 6px;
   padding: 5px 12px; cursor: pointer;
 }
-#term { flex: 1; min-height: 0; padding: 6px 0 0 8px; }
+.actions button.ghost { background: transparent; color: var(--primary); border: 1px solid var(--border); }
+.actions button.ghost[aria-expanded="true"] { background: var(--border); color: var(--text); }
+.body { flex: 1; min-height: 0; display: flex; }
+#term { flex: 1; min-width: 0; padding: 6px 0 0 8px; }
+
+/* Pannello file (SFTP) */
+#files {
+  width: 360px; flex: none; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bar); border-left: 1px solid var(--border);
+}
+#files[hidden] { display: none; }
+.files-head, .files-actions { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.files-head input {
+  flex: 1; min-width: 0; font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+}
+#files button.ghost, .upload {
+  font: inherit; font-size: 13px; color: var(--primary); background: transparent;
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; white-space: nowrap;
+}
+#files-list { list-style: none; margin: 0; padding: 4px 0; overflow: auto; flex: 1; }
+#files-list li { display: flex; gap: 8px; align-items: baseline; padding: 4px 12px; cursor: pointer; }
+#files-list li:hover { background: var(--border); }
+#files-list .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#files-list .dir .name { color: var(--primary); }
+#files-list .size { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#files-list .empty { color: var(--muted); cursor: default; }
+@media (max-width: 720px) {
+  #files { position: fixed; inset: 49px 0 0 0; width: auto; z-index: 5; }
+}
 #term .xterm { height: 100%; }

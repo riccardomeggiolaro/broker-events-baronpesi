@@ -25,6 +25,7 @@ collega solo al proprio 127.0.0.1.
 """
 import asyncio
 import os
+from datetime import datetime, timezone
 import threading
 
 import asyncssh
@@ -37,31 +38,61 @@ OPEN_TIMEOUT = 20
 
 _key_lock = threading.Lock()
 _key: asyncssh.SSHKey | None = None
+_key_mtime: float | None = None
+
+
+def _generate() -> asyncssh.SSHKey:
+    config.SSH_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(config.SSH_DIR, 0o700)
+    key = asyncssh.generate_private_key("ssh-ed25519", comment="in-out-remote-broker")
+    tmp = KEY_PATH.with_name(KEY_PATH.name + ".tmp")
+    key.write_private_key(str(tmp))
+    os.chmod(tmp, 0o600)
+    tmp.replace(KEY_PATH)
+    (config.SSH_DIR / "id_ed25519.pub").write_bytes(key.export_public_key())
+    return key
 
 
 def private_key() -> asyncssh.SSHKey:
-    """Chiave SSH del broker: letta dal volume dati o generata al primo uso."""
-    global _key
+    """Chiave SSH del broker: letta dal volume dati (e riletta se il pannello la rigenera)
+    o generata al primo uso."""
+    global _key, _key_mtime
     with _key_lock:
-        if _key is None:
-            if KEY_PATH.exists():
-                _key = asyncssh.read_private_key(str(KEY_PATH))
-            else:
-                config.SSH_DIR.mkdir(parents=True, exist_ok=True)
-                os.chmod(config.SSH_DIR, 0o700)
-                key = asyncssh.generate_private_key("ssh-ed25519", comment="in-out-remote-broker")
-                tmp = KEY_PATH.with_name(KEY_PATH.name + ".tmp")
-                key.write_private_key(str(tmp))
-                os.chmod(tmp, 0o600)
-                tmp.replace(KEY_PATH)
-                (config.SSH_DIR / "id_ed25519.pub").write_bytes(key.export_public_key())
-                _key = key
+        try:
+            mtime = KEY_PATH.stat().st_mtime
+        except FileNotFoundError:
+            mtime = None
+        if mtime is None:
+            _key = _generate()
+            _key_mtime = KEY_PATH.stat().st_mtime
+        elif _key is None or mtime != _key_mtime:
+            _key = asyncssh.read_private_key(str(KEY_PATH))
+            _key_mtime = mtime
         return _key
+
+
+def regenerate() -> None:
+    """Nuova chiave del broker: ogni in-out sostituisce la vecchia alla prossima apertura del terminale."""
+    global _key, _key_mtime
+    with _key_lock:
+        _key = _generate()
+        _key_mtime = KEY_PATH.stat().st_mtime
 
 
 def public_key() -> str:
     """Chiave pubblica in formato OpenSSH, senza commento (l'in-out mette il suo)."""
     return " ".join(private_key().export_public_key().decode().split()[:2])
+
+
+def fingerprint() -> str:
+    return private_key().get_fingerprint("sha256")
+
+
+def key_created_at() -> datetime | None:
+    try:
+        return datetime.fromtimestamp(KEY_PATH.stat().st_mtime, timezone.utc)
+    except FileNotFoundError:
+        return None
 
 
 class SSHSessionError(Exception):

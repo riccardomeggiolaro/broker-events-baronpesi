@@ -37,7 +37,7 @@ from urllib.parse import quote, urlsplit
 import itsdangerous
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -46,6 +46,7 @@ import asyncssh
 
 from . import config, db
 from .ssh import SSHSessionError, TunnelSSH
+from .ssh_sessions import Recorder
 from .tunnel import Tunnel
 
 SESSION_COOKIE = "broker_session"
@@ -89,17 +90,22 @@ async def lifespan(app):
 # ----------------------------------------------------------------------
 # Sessione del pannello e in-out
 # ----------------------------------------------------------------------
-def _logged_in(conn) -> bool:
-    """Verifica il cookie di sessione del pannello (stesso formato di SessionMiddleware)."""
+def _panel_user(conn) -> str | None:
+    """Utente del pannello dal cookie di sessione (stesso formato di SessionMiddleware), o None."""
     raw = conn.cookies.get(SESSION_COOKIE)
     if not raw:
-        return False
+        return None
     try:
         data = _signer.unsign(raw.encode("utf-8"), max_age=SESSION_MAX_AGE)
         session = json.loads(b64decode(data))
     except (itsdangerous.BadSignature, ValueError):
-        return False
-    return isinstance(session, dict) and bool(session.get("user"))
+        return None
+    user = session.get("user") if isinstance(session, dict) else None
+    return str(user) if user else None
+
+
+def _logged_in(conn) -> bool:
+    return _panel_user(conn) is not None
 
 
 def _device_by_id(device_id: str) -> dict | None:
@@ -432,6 +438,50 @@ async def proxy_ws(ws: WebSocket):
 
 
 # ----------------------------------------------------------------------
+# Stato della macchina (letto dalla pagina del dispositivo nel pannello)
+# ----------------------------------------------------------------------
+INFO_TIMEOUT = 10
+
+
+def _cors(request: Request, resp: Response) -> Response:
+    """La pagina del pannello è sullo stesso host ma su un'altra porta: si consente solo quella."""
+    origin = request.headers.get("origin")
+    if origin:
+        try:
+            if urlsplit(origin).hostname == request.url.hostname:
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Vary"] = "Origin"
+        except ValueError:
+            pass
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+async def device_info(request: Request):
+    def reply(data: dict, status: int = 200) -> Response:
+        return _cors(request, Response(json.dumps(data), status_code=status, media_type="application/json"))
+
+    if not _logged_in(request):
+        return reply({"detail": "non autenticato"}, 401)
+    device = _device_by_id(request.path_params["device_id"])
+    if device is None:
+        return reply({"detail": "dispositivo non trovato"}, 404)
+    if not device["channel_open"]:
+        return reply({"detail": "canale chiuso"}, 409)
+    try:
+        res, _ = await tunnel.request(device["id"], {"t": "info"}, timeout=INFO_TIMEOUT)
+    except asyncio.TimeoutError:
+        return reply({"detail": "l'in-out non risponde (spento, non collegato o versione senza questa funzione)"}, 504)
+    except ConnectionError as e:
+        return reply({"detail": f"proxy non collegato al broker: {e}"}, 502)
+    if not res.get("ok"):
+        return reply({"detail": str(res.get("error") or "errore dell'in-out")}, 502)
+    data = res.get("data") if isinstance(res.get("data"), dict) else {}
+    return reply({"device": device["id"], "data": data, "ssh_enabled": config.SSH_ENABLED})
+
+
+# ----------------------------------------------------------------------
 # Terminale SSH
 # ----------------------------------------------------------------------
 def _same_origin(conn) -> bool:
@@ -478,14 +528,30 @@ async def terminal_page(request: Request):
     <span class="muted" id="state">Collegamento…</span></div>
   <div class="actions">
     <button type="button" id="reconnect" hidden>Riconnetti</button>
+    <button type="button" id="files-toggle" class="ghost" aria-expanded="false">File</button>
     <a href="{html.escape(panel)}">Pannello</a>
   </div>
 </header>
-<div id="term"></div>
+<div class="body">
+  <div id="term"></div>
+  <aside id="files" hidden>
+    <div class="files-head">
+      <button type="button" id="files-up" class="ghost" title="Cartella superiore">↑</button>
+      <input id="files-path" spellcheck="false" aria-label="Cartella">
+      <button type="button" id="files-go" class="ghost">Vai</button>
+    </div>
+    <div class="files-actions">
+      <label class="upload">Carica file<input type="file" id="files-upload" hidden></label>
+      <span class="muted" id="files-state"></span>
+    </div>
+    <ul id="files-list"></ul>
+  </aside>
+</div>
 <script>window.__terminal={data};</script>
 <script src="/__remote/static/xterm/xterm.js?v={v}"></script>
 <script src="/__remote/static/xterm/addon-fit.js?v={v}"></script>
 <script src="/__remote/static/terminal.js?v={v}"></script>
+<script src="/__remote/static/files.js?v={v}"></script>
 </body></html>"""
     return HTMLResponse(body, headers={"Cache-Control": "no-store"})
 
@@ -514,6 +580,7 @@ async def ssh_ws(ws: WebSocket):
     cols = _term_size(ws.query_params.get("cols"), 80, 10, 500)
     rows = _term_size(ws.query_params.get("rows"), 24, 5, 200)
     session = TunnelSSH(tunnel, device["id"])
+    loop = asyncio.get_running_loop()
     try:
         await notify("status", "Apertura della connessione SSH…")
         try:
@@ -529,16 +596,23 @@ async def ssh_ws(ws: WebSocket):
             await notify("error", f"apertura della shell non riuscita: {e}")
             await ws.close(code=1000)
             return
+        panel_user = _panel_user(ws) or "?"
         with db.tx():
-            db.add_event("admin", device["id"], f"aperto il terminale SSH remoto (utente {session.user})")
-        await notify("ready", user=session.user)
+            db.add_event("admin", device["id"], f"aperto il terminale SSH remoto (utente {session.user}, da {panel_user})")
+        recorder = Recorder(device["id"], session.sid or "", panel_user, session.user)
+        opened_at = loop.time()
+        last_input = opened_at
+        reason = "chiuso dal browser"
+        await notify("ready", user=session.user, idle_minutes=config.SSH_IDLE_MINUTES)
 
         async def browser_to_ssh():
+            nonlocal last_input
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.disconnect":
                     return
                 if msg.get("bytes") is not None:
+                    last_input = loop.time()
                     proc.stdin.write(msg["bytes"])
                 elif msg.get("text"):
                     try:
@@ -552,25 +626,219 @@ async def ssh_ws(ws: WebSocket):
                         )
 
         async def ssh_to_browser():
+            nonlocal reason
             while True:
                 data = await proc.stdout.read(32 * 1024)
                 if not data:
+                    reason = "sessione terminata sull'in-out"
                     await notify("exit", "Sessione terminata.")
                     await ws.close(code=1000)
                     return
+                recorder.write(data)
                 await ws.send_bytes(data)
 
+        async def idle_watch():
+            nonlocal reason
+            limit = config.SSH_IDLE_MINUTES * 60
+            while True:
+                await asyncio.sleep(min(30, limit))
+                if loop.time() - last_input >= limit:
+                    reason = f"chiuso per inattività ({config.SSH_IDLE_MINUTES} min)"
+                    await notify("exit", f"Terminale chiuso dopo {config.SSH_IDLE_MINUTES} minuti senza attività.")
+                    await ws.close(code=1000)
+                    return
+
         tasks = [asyncio.create_task(browser_to_ssh()), asyncio.create_task(ssh_to_browser())]
+        if config.SSH_IDLE_MINUTES > 0:
+            tasks.append(asyncio.create_task(idle_watch()))
         try:
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         finally:
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            minutes = (loop.time() - opened_at) / 60
+            summary = f"chiuso il terminale SSH remoto (utente {session.user}, da {panel_user}, " \
+                      f"durata {_duration(minutes)}, {reason})"
+            recorder.close(summary)
+            with db.tx():
+                db.add_event("admin", device["id"], summary)
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
         await session.close()
+
+
+# ----------------------------------------------------------------------
+# Trasferimento file (SFTP sulla stessa connessione SSH)
+# ----------------------------------------------------------------------
+def _json(data: dict, status: int = 200) -> Response:
+    return Response(json.dumps(data), status_code=status, media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
+
+
+async def _sftp_device(request: Request):
+    """Controlli comuni: login, origine (pagina del terminale), dispositivo con canale aperto."""
+    if not _logged_in(request):
+        return None, _json({"detail": "non autenticato: accedi di nuovo al pannello"}, 401)
+    if not config.SSH_ENABLED:
+        return None, _json({"detail": "terminale disattivato sul broker"}, 403)
+    if request.method != "GET" and not _same_origin(request):
+        return None, _json({"detail": "origine non consentita"}, 403)
+    device = _device_by_id(request.path_params["device_id"])
+    if device is None:
+        return None, _json({"detail": "dispositivo non trovato"}, 404)
+    if not device["channel_open"]:
+        return None, _json({"detail": "canale chiuso"}, 409)
+    return device, None
+
+
+async def _sftp_open(device_id: str):
+    session = TunnelSSH(tunnel, device_id)
+    conn = await session.open()
+    try:
+        sftp = await conn.start_sftp_client()
+    except (OSError, asyncssh.Error) as e:
+        await session.close()
+        raise SSHSessionError(f"SFTP non disponibile sull'in-out: {e}")
+    return session, sftp
+
+
+def _sftp_error(e: Exception) -> Response:
+    if isinstance(e, asyncssh.SFTPNoSuchFile):
+        return _json({"detail": "file o cartella inesistente"}, 404)
+    if isinstance(e, asyncssh.SFTPPermissionDenied):
+        return _json({"detail": "permesso negato"}, 403)
+    return _json({"detail": str(e) or type(e).__name__}, 502)
+
+
+async def files_list(request: Request):
+    device, err = await _sftp_device(request)
+    if err:
+        return err
+    path = request.query_params.get("path") or "."
+    try:
+        session, sftp = await _sftp_open(device["id"])
+    except SSHSessionError as e:
+        return _json({"detail": str(e)}, 502)
+    try:
+        real = await sftp.realpath(path)
+        entries = []
+        for item in await sftp.readdir(real):
+            if item.filename in (".", ".."):
+                continue
+            a = item.attrs
+            entries.append({
+                "name": item.filename,
+                "dir": a.type == asyncssh.FILEXFER_TYPE_DIRECTORY,
+                "link": a.type == asyncssh.FILEXFER_TYPE_SYMLINK,
+                "size": a.size,
+                "mtime": a.mtime,
+            })
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        return _json({"path": real, "entries": entries, "user": session.user})
+    except (OSError, asyncssh.Error) as e:
+        return _sftp_error(e)
+    finally:
+        sftp.exit()
+        await session.close()
+
+
+async def files_download(request: Request):
+    device, err = await _sftp_device(request)
+    if err:
+        return err
+    path = request.query_params.get("path") or ""
+    if not path:
+        return _json({"detail": "percorso mancante"}, 400)
+    try:
+        session, sftp = await _sftp_open(device["id"])
+    except SSHSessionError as e:
+        return _json({"detail": str(e)}, 502)
+    try:
+        attrs = await sftp.stat(path)
+        if attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
+            raise ValueError("è una cartella")
+        if attrs.size is not None and attrs.size > config.SFTP_MAX_BYTES:
+            raise ValueError(f"file troppo grande (limite {config.SFTP_MAX_BYTES // 1048576} MB, SFTP_MAX_MB)")
+        f = await sftp.open(path, "rb")
+    except ValueError as e:
+        sftp.exit()
+        await session.close()
+        return _json({"detail": str(e)}, 400)
+    except (OSError, asyncssh.Error) as e:
+        sftp.exit()
+        await session.close()
+        return _sftp_error(e)
+
+    async def body():
+        try:
+            while True:
+                chunk = await f.read(256 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            await f.close()
+            sftp.exit()
+            await session.close()
+
+    with db.tx():
+        db.add_event("admin", device["id"], f"scaricato dall'in-out {path} ({_panel_user(request)})")
+    name = path.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or "file"
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}", "Cache-Control": "no-store"}
+    if attrs.size is not None:
+        headers["Content-Length"] = str(attrs.size)
+    return StreamingResponse(body(), media_type="application/octet-stream", headers=headers)
+
+
+async def files_upload(request: Request):
+    device, err = await _sftp_device(request)
+    if err:
+        return err
+    folder = request.query_params.get("path") or "."
+    size = request.headers.get("content-length")
+    if size and size.isdigit() and int(size) > config.SFTP_MAX_BYTES + 64 * 1024:
+        return _json({"detail": f"file troppo grande (limite {config.SFTP_MAX_BYTES // 1048576} MB, SFTP_MAX_MB)"}, 413)
+    form = await request.form(max_part_size=config.SFTP_MAX_BYTES)
+    upload = form.get("file")
+    if upload is None or not getattr(upload, "filename", None):
+        return _json({"detail": "nessun file"}, 400)
+    name = upload.filename.replace("\\", "/").rsplit("/", 1)[-1]
+    if name in ("", ".", ".."):
+        return _json({"detail": "nome del file non valido"}, 400)
+    try:
+        session, sftp = await _sftp_open(device["id"])
+    except SSHSessionError as e:
+        return _json({"detail": str(e)}, 502)
+    try:
+        real = await sftp.realpath(folder)
+        target = real.rstrip("/") + "/" + name
+        written = 0
+        async with sftp.open(target, "wb") as f:
+            while True:
+                chunk = await upload.read(256 * 1024)
+                if not chunk:
+                    break
+                await f.write(chunk)
+                written += len(chunk)
+        with db.tx():
+            db.add_event("admin", device["id"], f"caricato sull'in-out {target} ({written} byte, {_panel_user(request)})")
+        return _json({"path": target, "size": written})
+    except (OSError, asyncssh.Error) as e:
+        return _sftp_error(e)
+    finally:
+        await upload.close()
+        sftp.exit()
+        await session.close()
+
+
+def _duration(minutes: float) -> str:
+    if minutes < 1:
+        return "meno di un minuto"
+    if minutes < 60:
+        return f"{int(minutes)} min"
+    return f"{int(minutes // 60)} h {int(minutes % 60)} min"
 
 
 METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -580,8 +848,12 @@ app = Starlette(
     routes=[
         Route(RESERVED + "open/{device_id}", open_device, methods=["GET"]),
         Route(RESERVED + "status", remote_status, methods=["GET"]),
+        Route(RESERVED + "info/{device_id}", device_info, methods=["GET"]),
         Route(RESERVED + "terminal/{device_id}", terminal_page, methods=["GET"]),
         WebSocketRoute(RESERVED + "ssh/{device_id}", ssh_ws),
+        Route(RESERVED + "files/{device_id}/list", files_list, methods=["GET"]),
+        Route(RESERVED + "files/{device_id}/download", files_download, methods=["GET"]),
+        Route(RESERVED + "files/{device_id}/upload", files_upload, methods=["POST"]),
         Mount(RESERVED + "static", StaticFiles(directory=STATIC_DIR), name="static"),
         Route("/{path:path}", proxy_http, methods=METHODS),
         WebSocketRoute("/{path:path}", proxy_ws),

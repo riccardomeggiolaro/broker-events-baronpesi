@@ -58,7 +58,8 @@
         setState("", msg.message);
       } else if (msg.type === "ready") {
         ready = true;
-        setState("ok", "Collegato come " + msg.user);
+        setState("ok", "Collegato come " + msg.user +
+          (msg.idle_minutes ? " · si chiude dopo " + msg.idle_minutes + " min senza attività" : ""));
         sendSize();
         term.focus();
       } else if (msg.type === "error") {

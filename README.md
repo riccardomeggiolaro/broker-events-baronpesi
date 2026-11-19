@@ -131,6 +131,12 @@ browser ──wss://BROKER_HOST:8443/__remote/ssh/<ID>──▶ proxy remoto (cl
 - **Accesso con chiave, senza password**: il broker ha una sua chiave SSH (`/data/ssh/id_ed25519`, creata al primo uso; la privata non lascia mai il broker). La chiave pubblica viaggia con ogni apertura del terminale: l'in-out la installa da solo in `authorized_keys` dell'utente scelto nelle sue impostazioni, con il vincolo `from="127.0.0.1,::1"`, cioè valida solo per le connessioni arrivate dal tunnel.
 - **Sull'in-out** (pagina Broker MQTT): *Consenti il terminale SSH* (attivo di default; se lo disattivi la chiave viene tolta da `authorized_keys`) e *Utente SSH* (default `root`). Serve un in-out Linux con sshd attivo, che accetti le chiavi: per `root` serve `PermitRootLogin prohibit-password` (il default di Debian e Ubuntu) o `yes`.
 - **Accesso al terminale**: serve il login del pannello; il websocket accetta solo connessioni dalla pagina del terminale (controllo dell'`Origin`). Ogni apertura è registrata negli eventi del dispositivo con l'utente usato.
+- **Windows**: se OpenSSH Server manca, l'in-out ne avvia l'installazione alla prima apertura (serve che giri come amministratore) e chiede di riprovare dopo qualche minuto. La chiave va in `C:\ProgramData\ssh\administrators_authorized_keys` per gli amministratori, altrimenti in `%USERPROFILE%\.ssh\authorized_keys`. Con utente `root` (default) si usa l'utente con cui gira l'in-out.
+- **File**: il pulsante *File* della pagina del terminale apre un pannello SFTP sulla stessa connessione: sfoglia le cartelle, scarica un file con un clic, carica file nella cartella aperta (fino a `SFTP_MAX_MB`). Ogni trasferimento è registrato negli eventi.
+- **Registrazioni**: tutto quello che compare nel terminale (comandi compresi) viene salvato in `/data/ssh-sessions/<ID>/` e si scarica dalla pagina del dispositivo; restano `RETENTION_DAYS` giorni. Negli eventi: apertura e chiusura con utente del pannello, durata e motivo.
+- **Inattività**: un terminale senza tasti premuti per `SSH_IDLE_MINUTES` minuti (default 30) viene chiuso.
+- **Chiave del broker**: nella pagina *Broker* c'è l'impronta e il pulsante *Rigenera chiave SSH*; ogni in-out sostituisce la vecchia alla prossima apertura.
+- **Stato della macchina**: nella pagina del dispositivo il riquadro *Macchina* mostra versione dell'in-out, sistema, uptime, CPU, memoria, disco e se il server SSH è pronto, letti dall'in-out attraverso il tunnel.
 - Si disattiva sul broker con `SSH_ENABLED=0`. Se si perde `/data/ssh` il broker crea una nuova chiave e gli in-out la installano alla prossima apertura, sostituendo la vecchia.
 
 ## Canali, revoca e pesate in coda
@@ -160,6 +166,10 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 | `REMOTE_PUBLIC_PORT` | `8443` | Porta dell'accesso remoto (HTTPS con Caddy, HTTP in LAN) |
 | `REMOTE_TIMEOUT` | `60` | Secondi di attesa della risposta dell'in-out |
 | `SSH_ENABLED` | `1` | Terminale SSH verso gli in-out nel pannello (richiede `REMOTE_ENABLED=1`) |
+| `SSH_IDLE_MINUTES` | `30` | Chiusura del terminale dopo questi minuti senza attività (0 = mai) |
+| `SSH_RECORD` | `1` | Registrazione delle sessioni del terminale in `/data/ssh-sessions` |
+| `SSH_RECORD_MAX_MB` | `20` | Dimensione massima di una registrazione |
+| `SFTP_MAX_MB` | `200` | Dimensione massima di un file scaricato o caricato dalla pagina del terminale |
 | `TZ` | `Europe/Rome` | Fuso orario per le date nel pannello |
 
 Se cambi `BROKER_HOST`, il certificato del server viene rigenerato al riavvio. I certificati client restano validi, perché la CA non cambia.
@@ -171,6 +181,7 @@ Tutto è nel volume `broker_data` (`/data` nel container):
 ```
 /data/pki/            CA (ca.key!), server, certificati emessi, crl.pem
 /data/ssh/            chiave SSH del broker per il terminale degli in-out
+/data/ssh-sessions/   registrazioni delle sessioni del terminale
 /data/mosquitto/      mosquitto.conf, acl, persistenza, log (generati)
 /data/broker.sqlite3  dispositivi, certificati, messaggi, eventi
 /data/attachments/    foto, PDF e CSV delle pesate
@@ -194,6 +205,7 @@ app/
   remote.py    accesso remoto agli in-out su /<ID>/: proxy HTTP/websocket sulla porta 8081 (8443 tramite Caddy)
   tunnel.py    protocollo del tunnel su MQTT (<ID>/tunnel/req e <ID>/tunnel/res)
   ssh.py       terminale SSH: chiave del broker e connessione SSH trasportata dal tunnel
+  ssh_sessions.py  registrazioni delle sessioni del terminale
   static/xterm/  xterm.js 5.5.0 e addon-fit 0.10.0 (licenza MIT) per la pagina del terminale
   db.py        schema SQLite
 docker/        entrypoint e supervisord (Mosquitto, pannello e registrazione nello stesso container)
