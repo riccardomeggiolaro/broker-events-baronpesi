@@ -15,14 +15,14 @@ Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello
  in-out ──HTTPS 8884 (registrazione, CSR)────▶ ┌──────────── container "broker" ────────────┐
  in-out ──MQTT/TLS 8883 (certificato client)──▶ │ Mosquitto ◀── ACL/CRL/SIGHUP ── pannello   │
  browser ──HTTPS 443──▶ Caddy ──▶ 8080 ───────▶ │            ──▶ subscriber "#" ──▶ SQLite   │
- browser ──HTTPS 8443─▶ Caddy ──▶ 8081 ───────▶ │ proxy remoto ◀─▶ <ID>/tunnel/req|res ◀─▶ in-out│
+ browser /<ID>/ (stessa porta) ───────────────▶ │ proxy remoto ◀─▶ <ID>/tunnel/req|res ◀─▶ in-out│
                                                 │                                + allegati  │
                                                 └────────────── volume /data ────────────────┘
 ```
 
 ## Avvio
 
-Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443**, **8883**, **8884** e **8443** (accesso remoto agli in-out) aperte.
+Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443**, **8883** e **8884** aperte.
 
 ```bash
 cp .env.example .env
@@ -54,7 +54,7 @@ Nel `.env`: `BROKER_HOST=192.168.1.50` (l'IP del PC), `ADMIN_PASSWORD=...`, `SES
 docker compose -f docker-compose.lan.yml up -d --build
 ```
 
-Pannello: `http://192.168.1.50:8080`, accesso remoto agli in-out su `http://192.168.1.50:8443`. Negli in-out: host `192.168.1.50` (porte `8883` e `8884`).
+Pannello e accesso remoto agli in-out: `http://192.168.1.50:8080`. Negli in-out: host `192.168.1.50` (porte `8883` e `8884`).
 
 ## Collegare un in-out (registrazione automatica)
 
@@ -99,13 +99,13 @@ L'identità del dispositivo è il CN del certificato: l'ACL gli permette di scri
 Nella pagina del dispositivo, **Apri l'in-out da remoto** apre in una nuova scheda l'interfaccia web dell'in-out, come se fossi in rete locale: pagine, chiamate alle API REST e websocket (pesi in tempo reale, log…). Non serve aprire porte verso l'impianto: tutto passa nella connessione MQTT/TLS che l'in-out tiene già aperta.
 
 ```
-browser ──▶ https://BROKER_HOST:8443/<ID>/... ──▶ proxy remoto ──MQTT <ID>/tunnel/req──▶ in-out ──▶ http://127.0.0.1:<porta API>/...
+browser ──▶ https://BROKER_HOST/<ID>/... ──▶ proxy remoto ──MQTT <ID>/tunnel/req──▶ in-out ──▶ http://127.0.0.1:<porta API>/...
         ◀───────────────────────────────────────────────────────MQTT <ID>/tunnel/res◀──
 ```
 
-- **Un indirizzo per ogni in-out**: `https://BROKER_HOST:8443/<ID>/` (in LAN `http://IP:8443/<ID>/`). Si possono tenere aperti più in-out insieme, in schede diverse dello stesso browser, ognuno con il suo login.
-- **Porta dedicata** (`REMOTE_PUBLIC_PORT`, default `8443`): con Caddy è in HTTPS con lo stesso certificato del pannello; in LAN è in HTTP.
-- **Accesso**: serve il login del pannello (lo stesso cookie di sessione, verificato anche sulla 8443). Poi l'in-out chiede il suo login come sempre.
+- **Un indirizzo per ogni in-out**: `https://BROKER_HOST/<ID>/` (in LAN `http://IP:8080/<ID>/`). Si possono tenere aperti più in-out insieme, in schede diverse dello stesso browser, ognuno con il suo login.
+- **Stessa porta del pannello**: `app/gateway.py` smista le richieste. `/__panel/...` va sempre al pannello, `/__remote/...` e `/<ID>/...` al proxy remoto, le richieste senza prefisso fatte da una pagina dell'in-out (Referer `/<ID>/...`) all'in-out, il resto al pannello. Un in-out con lo stesso nome di una sezione del pannello (`devices`, `login`, `static`...) non è raggiungibile da remoto.
+- **Accesso**: serve il login del pannello (lo stesso cookie di sessione). Poi l'in-out chiede il suo login come sempre.
 - L'interfaccia dell'in-out usa percorsi assoluti (`/api`, `/static`, `/login`…). Il proxy la adatta al prefisso `/<ID>` senza modificare l'in-out:
   - nelle pagine HTML inietta `app/static/remote-shim.js`, che aggiunge il prefisso a `fetch`, XHR, WebSocket, EventSource, `window.open` e `history`, e tiene separato il `localStorage` di ogni in-out (chiavi `/<ID>:token`…);
   - nelle pagine e negli script riscrive le letture di `location.pathname` nel percorso senza prefisso, così i controlli tipo `=== '/reservation'` funzionano;
@@ -122,11 +122,11 @@ Il canale deve essere aperto: l'ACL permette all'in-out di leggere `<ID>/tunnel/
 Nella pagina del dispositivo, **Apri il terminale SSH** apre in una nuova scheda un terminale (xterm.js) collegato alla shell dell'in-out. Anche l'SSH passa nella connessione MQTT/TLS già aperta dall'in-out: sull'impianto non si apre nessuna porta.
 
 ```
-browser ──wss://BROKER_HOST:8443/__remote/ssh/<ID>──▶ proxy remoto (client SSH) ──MQTT <ID>/tunnel/req──▶ in-out ──▶ sshd 127.0.0.1:22
+browser ──wss://BROKER_HOST/__remote/ssh/<ID>──▶ proxy remoto (client SSH) ──MQTT <ID>/tunnel/req──▶ in-out ──▶ sshd 127.0.0.1:22
         ◀── byte del terminale ──────────────────────────────────────────────MQTT <ID>/tunnel/res◀──
 ```
 
-- **Un terminale per ogni in-out**: `https://BROKER_HOST:8443/__remote/terminal/<ID>`. Se ne possono aprire più di uno, anche verso in-out diversi, in schede separate.
+- **Un terminale per ogni in-out**: `https://BROKER_HOST/__remote/terminal/<ID>`. Se ne possono aprire più di uno, anche verso in-out diversi, in schede separate.
 - **SSH cifrato da un capo all'altro**: il proxy remoto fa da client SSH (asyncssh) e il tunnel trasporta solo i byte della connessione verso il sshd dell'in-out.
 - **Accesso con chiave, senza password**: il broker ha una sua chiave SSH (`/data/ssh/id_ed25519`, creata al primo uso; la privata non lascia mai il broker). La chiave pubblica viaggia con ogni apertura del terminale: l'in-out la installa da solo in `authorized_keys` dell'utente scelto nelle sue impostazioni, con il vincolo `from="127.0.0.1,::1"`, cioè valida solo per le connessioni arrivate dal tunnel.
 - **Sull'in-out** (pagina Broker MQTT): *Consenti il terminale SSH* (attivo di default; se lo disattivi la chiave viene tolta da `authorized_keys`) e *Utente SSH* (default `root`). Serve un in-out Linux con sshd attivo, che accetti le chiavi: per `root` serve `PermitRootLogin prohibit-password` (il default di Debian e Ubuntu) o `yes`.
@@ -163,7 +163,6 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 | `ENROLL_ENABLED` | `1` | Registrazione automatica degli in-out sulla porta 8884 |
 | `ENROLL_PUBLIC_PORT` | `8884` | Porta di registrazione pubblicata |
 | `REMOTE_ENABLED` | `1` | Pulsante di accesso remoto agli in-out nel pannello |
-| `REMOTE_PUBLIC_PORT` | `8443` | Porta dell'accesso remoto (HTTPS con Caddy, HTTP in LAN) |
 | `REMOTE_TIMEOUT` | `60` | Secondi di attesa della risposta dell'in-out |
 | `SSH_ENABLED` | `1` | Terminale SSH verso gli in-out nel pannello (richiede `REMOTE_ENABLED=1`) |
 | `SSH_IDLE_MINUTES` | `30` | Chiusura del terminale dopo questi minuti senza attività (0 = mai) |
@@ -202,7 +201,8 @@ app/
   broker.py    mosquitto.conf, ACL, ricarica, scollegamento, lettura del log (stato online)
   ingest.py    subscriber MQTT interno che archivia i messaggi, pulizia dello storico
   enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)
-  remote.py    accesso remoto agli in-out su /<ID>/: proxy HTTP/websocket sulla porta 8081 (8443 tramite Caddy)
+  gateway.py   porta unica 8080: smista tra pannello e accesso remoto
+  remote.py    accesso remoto agli in-out su /<ID>/: proxy HTTP/websocket attraverso MQTT
   tunnel.py    protocollo del tunnel su MQTT (<ID>/tunnel/req e <ID>/tunnel/res)
   ssh.py       terminale SSH: chiave del broker e connessione SSH trasportata dal tunnel
   ssh_sessions.py  registrazioni delle sessioni del terminale

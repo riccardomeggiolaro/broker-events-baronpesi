@@ -1,4 +1,4 @@
-"""Accesso remoto agli in-out (porta dedicata, REMOTE_PUBLIC_PORT).
+"""Accesso remoto agli in-out, sulla stessa porta del pannello (vedi `gateway.py`).
 
 Ogni in-out ha il suo indirizzo `/<id>/...`: quello che arriva lì (pagine, API REST,
 websocket) viene inoltrato all'in-out `<id>` attraverso la connessione MQTT (vedi
@@ -20,8 +20,8 @@ Terminale SSH: `/__remote/terminal/<id>` apre una pagina con un terminale (xterm
 al websocket `/__remote/ssh/<id>`; il proxy fa da client SSH verso l'in-out attraverso lo
 stesso tunnel MQTT (vedi `ssh.py`).
 
-Accesso: serve il login del pannello. Il cookie di sessione del pannello vale anche su
-questa porta (i cookie non distinguono le porte) e viene verificato con la stessa chiave.
+Accesso: serve il login del pannello (stesso cookie di sessione, verificato con la stessa
+chiave).
 I cookie del pannello non vengono mai inoltrati all'in-out.
 """
 import asyncio
@@ -143,13 +143,9 @@ def _prefix(device: dict) -> str:
 
 
 def _panel_url(conn) -> str:
-    """Indirizzo del pannello sullo stesso host: HTTPS tramite Caddy, oppure HTTP sulla porta del pannello (LAN)."""
-    host = conn.url.hostname or config.BROKER_HOST
-    if ":" in host:
-        host = f"[{host}]"
-    if conn.url.scheme in ("https", "wss"):
-        return f"https://{host}"
-    return f"http://{host}:{config.WEB_PORT}"
+    """Indirizzo del pannello sulla stessa porta (vedi gateway.py): `/__panel` va sempre al
+    pannello, anche quando la richiesta parte da una pagina dell'in-out."""
+    return "/__panel"
 
 
 def _page(request: Request, title: str, text: str, status: int, device: dict | None = None) -> HTMLResponse:
@@ -162,7 +158,7 @@ main{{max-width:560px;margin:10vh auto;background:#fff;border-radius:10px;paddin
 h1{{font-size:20px;margin:0 0 12px}}p{{line-height:1.5}}a{{color:#1f5fbf}}
 @media (prefers-color-scheme: dark){{body{{background:#14171c;color:#e6e8eb}}main{{background:#1d2128}}a{{color:#7fb0ff}}}}</style>
 </head><body><main><h1>{html.escape(title)}</h1><p>{text}</p>
-<p><a href="{html.escape(back)}">Torna al pannello</a></p></main></body></html>"""
+<p><a href="{html.escape(back)}" rel="noreferrer">Torna al pannello</a></p></main></body></html>"""
     return HTMLResponse(body, status_code=status)
 
 
@@ -443,24 +439,15 @@ async def proxy_ws(ws: WebSocket):
 INFO_TIMEOUT = 10
 
 
-def _cors(request: Request, resp: Response) -> Response:
-    """La pagina del pannello è sullo stesso host ma su un'altra porta: si consente solo quella."""
-    origin = request.headers.get("origin")
-    if origin:
-        try:
-            if urlsplit(origin).hostname == request.url.hostname:
-                resp.headers["Access-Control-Allow-Origin"] = origin
-                resp.headers["Access-Control-Allow-Credentials"] = "true"
-                resp.headers["Vary"] = "Origin"
-        except ValueError:
-            pass
+def _no_store(resp: Response) -> Response:
+    """Stato della macchina: letto dalla pagina del pannello (stessa porta), mai in cache."""
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
 async def device_info(request: Request):
     def reply(data: dict, status: int = 200) -> Response:
-        return _cors(request, Response(json.dumps(data), status_code=status, media_type="application/json"))
+        return _no_store(Response(json.dumps(data), status_code=status, media_type="application/json"))
 
     if not _logged_in(request):
         return reply({"detail": "non autenticato"}, 401)

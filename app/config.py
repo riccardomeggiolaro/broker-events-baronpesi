@@ -60,17 +60,12 @@ def control_topic(device_id: str) -> str:
 
 # Accesso remoto all'in-out: richieste HTTP/websocket inoltrate attraverso la
 # connessione MQTT (il pannello scrive su <id>/tunnel/req, l'in-out risponde su
-# <id>/tunnel/res). Il proxy risponde su una porta dedicata, così l'interfaccia
-# dell'in-out funziona dalla radice "/" come in rete locale.
+# <id>/tunnel/res). Il proxy risponde sulla porta del pannello (vedi gateway.py),
+# all'indirizzo /<id>/.
 TUNNEL_PREFIX = "tunnel"
 TUNNEL_REQ_SUFFIX = f"{TUNNEL_PREFIX}/req"
 TUNNEL_RES_SUFFIX = f"{TUNNEL_PREFIX}/res"
 REMOTE_ENABLED = os.environ.get("REMOTE_ENABLED", "1") == "1"
-REMOTE_INTERNAL_PORT = 8081
-# Porta pubblicata del proxy remoto (con Caddy in HTTPS, in LAN in HTTP)
-REMOTE_PUBLIC_PORT = _int("REMOTE_PUBLIC_PORT", 8443)
-# Porta del pannello in HTTP (installazione in LAN), per i collegamenti dal proxy al pannello
-WEB_PORT = _int("WEB_PORT", 8080)
 # Tempo massimo di attesa della risposta dell'in-out (secondi)
 REMOTE_TIMEOUT = _int("REMOTE_TIMEOUT", 60)
 # Dimensione massima di una richiesta o risposta inoltrata

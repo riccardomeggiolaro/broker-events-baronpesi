@@ -1,4 +1,5 @@
 # HTTPS automatico (Let's Encrypt) per il pannello sul dominio del broker.
+# Sulla stessa porta c'è anche l'accesso remoto agli in-out (https://BROKER_HOST/<ID>/).
 # Il DNS di BROKER_HOST deve puntare a questo server e le porte 80/443 devono essere aperte.
 {$BROKER_HOST} {
 	encode gzip
@@ -7,17 +8,6 @@
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "SAMEORIGIN"
-		Referrer-Policy "same-origin"
-	}
-}
-
-# Accesso remoto all'in-out: stesso dominio e certificato, porta dedicata (REMOTE_PUBLIC_PORT).
-# Il login è quello del pannello; le richieste arrivano all'in-out attraverso il broker MQTT.
-{$BROKER_HOST}:8443 {
-	encode gzip
-	reverse_proxy broker:8081
-	header {
-		Strict-Transport-Security "max-age=31536000"
 		Referrer-Policy "same-origin"
 	}
 }
