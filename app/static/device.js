@@ -50,7 +50,7 @@
     state.hidden = false;
     state.textContent = "Lettura dello stato dall'in-out…";
     try {
-      const r = await fetch(url, { credentials: "include", cache: "no-store" });
+      const r = await fetch(url, { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.detail || `errore ${r.status}`);
       const d = j.data || {};

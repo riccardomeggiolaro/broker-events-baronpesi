@@ -12,8 +12,7 @@ services:
       - "${BROKER_PUBLIC_PORT:-8883}:8883"   # MQTT su TLS, raggiungibile dagli in-out
       - "${ENROLL_PUBLIC_PORT:-8884}:8884"   # registrazione automatica degli in-out (HTTPS)
     expose:
-      - "8080"                               # pannello: pubblicato solo tramite Caddy
-      - "8081"                               # accesso remoto all'in-out: pubblicato solo tramite Caddy
+      - "8080"                               # pannello + accesso remoto agli in-out: pubblicato solo tramite Caddy
     volumes:
       - broker_data:/data
     logging:
@@ -29,7 +28,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "${REMOTE_PUBLIC_PORT:-8443}:8443"   # accesso remoto all'in-out (HTTPS)
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
