@@ -228,8 +228,10 @@ def bootstrap() -> None:
 # Lettura del log: stato dei dispositivi
 # ----------------------------------------------------------------------
 TS_RE = r"^(?P<ts>\S+): "
-RE_CONNECT = re.compile(TS_RE + r"New client connected from (?P<ip>\S+?):\d+ as (?P<cid>\S+) \(.*?u'(?P<user>[^']*)'")
-RE_CONNECT_NOUSER = re.compile(TS_RE + r"New client connected from (?P<ip>\S+?):\d+ as (?P<cid>\S+) \(")
+RE_CONNECT = re.compile(
+    TS_RE + r"New client connected from (?P<ip>\S+?):(?P<port>\d+) as (?P<cid>\S+) \(.*?u'(?P<user>[^']*)'"
+)
+RE_CONNECT_NOUSER = re.compile(TS_RE + r"New client connected from (?P<ip>\S+?):(?P<port>\d+) as (?P<cid>\S+) \(")
 RE_DISCONNECT = re.compile(
     TS_RE + r"Client (?P<cid>\S+) (?:disconnected|closed its connection|has exceeded timeout|"
     r"already connected, closing old connection)(?P<rest>.*)$"
@@ -238,7 +240,7 @@ RE_SOCKET_ERR = re.compile(TS_RE + r"(?:Socket error on client|Bad socket read/w
 RE_DENIED = re.compile(TS_RE + r"Denied PUBLISH from (?P<cid>\S+) .*?'(?P<topic>[^']*)'")
 RE_TLS_ERR = re.compile(TS_RE + r"(?:OpenSSL Error\[\d+\]: |Client connection from (?P<ip>\S+?) failed: )(?P<err>.*)$")
 RE_START = re.compile(TS_RE + r"mosquitto version \S+ starting")
-RE_NEWCONN = re.compile(TS_RE + r"New connection from (?P<ip>\S+?):\d+ on port")
+RE_NEWCONN = re.compile(TS_RE + r"New connection from (?P<ip>\S+?):(?P<port>\d+) on port")
 
 DISCONNECT_REASONS = [
     ("already connected, closing old connection", "scollegato (connessione sostituita)"),
@@ -255,6 +257,15 @@ def _disconnect_reason(line: str) -> str:
         if needle in line:
             return text
     return line.split(": ", 1)[-1].strip()
+
+
+def _real_ip(m: re.Match) -> str:
+    """IP del client: per le connessioni arrivate dalla porta unica (127.0.0.1) quello annotato dal mux."""
+    try:
+        at = datetime.strptime(m["ts"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+        return db.real_ip(m["ip"], int(m["port"]), at)
+    except Exception:
+        return m["ip"]
 
 
 def _parse_ts(ts: str) -> str:
@@ -310,7 +321,7 @@ class Presence:
             return
         m = RE_NEWCONN.match(line)
         if m:
-            self._last_ip = m["ip"]
+            self._last_ip = _real_ip(m)
             return
         m = RE_CONNECT.match(line) or RE_CONNECT_NOUSER.match(line)
         if m:
@@ -318,9 +329,10 @@ class Presence:
             ts = _parse_ts(m["ts"])
             if "user" in m.groupdict() and m["user"] == config.MONITOR_ID and cid != config.MONITOR_ID:
                 return  # connessione del pannello per scollegare un dispositivo (kick)
+            ip = _real_ip(m)
             with self._lock:
-                self.online[cid] = {"since": ts, "ip": m["ip"]}
-            self._emit("connect", cid, f"da {m['ip']}", ts, record)
+                self.online[cid] = {"since": ts, "ip": ip}
+            self._emit("connect", cid, f"da {ip}", ts, record)
             return
         m = RE_DISCONNECT.match(line) or RE_SOCKET_ERR.match(line)
         if m:

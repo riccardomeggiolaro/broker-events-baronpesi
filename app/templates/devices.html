@@ -6,7 +6,7 @@
 <div class="page-head"><h1>Dispositivi</h1><span class="muted">{{ devices|length }} registrati</span></div>
 
 {% if enroll_enabled %}
-<p class="muted small">Gli in-out si registrano da soli (porta {{ enroll_port }}): un in-out configurato con l'host del broker
+<p class="muted small">Gli in-out si registrano da soli (porta {% if mux_port %}{{ mux_port }} con ALPN <code>{{ alpn_enroll }}</code> o {% endif %}{{ enroll_port }}): un in-out configurato con l'host del broker
   riceve il certificato e compare qui con il canale aperto. Per bloccarlo chiudi il canale.</p>
 {% else %}
 <div class="flash warn">Registrazione automatica disattivata (<code>ENROLL_ENABLED=0</code>): nuovi in-out non possono registrarsi

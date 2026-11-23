@@ -12,17 +12,22 @@ Broker MQTT (Mosquitto) per ricevere le pesate dagli **in-out**, con un pannello
 - **terminale SSH**: per ogni in-out un terminale nel browser, sempre attraverso la connessione MQTT, con accesso a chiave senza password.
 
 ```
- in-out ──HTTPS 8884 (registrazione, CSR)────▶ ┌──────────── container "broker" ────────────┐
- in-out ──MQTT/TLS 8883 (certificato client)──▶ │ Mosquitto ◀── ACL/CRL/SIGHUP ── pannello   │
- browser ──HTTPS 443──▶ Caddy ──▶ 8080 ───────▶ │            ──▶ subscriber "#" ──▶ SQLite   │
- browser /<ID>/ (stessa porta) ───────────────▶ │ proxy remoto ◀─▶ <ID>/tunnel/req|res ◀─▶ in-out│
-                                                │                                + allegati  │
-                                                └────────────── volume /data ────────────────┘
+                         ┌──────────────── container "broker" ─────────────────┐
+ in-out  ALPN mqtt ───┐  │  porta unica ──▶ 8883 Mosquitto ◀── ACL/CRL ── pannello│
+ in-out  ALPN enroll ─┼─▶│  443 (mux)   ──▶ 8884 registrazione (CSR)            │
+ browser (h2/http1.1)─┘  │      │                    subscriber "#" ──▶ SQLite   │
+                         │      └─ PROXY v2 ─▶ Caddy ──▶ 8080 pannello          │
+                         │                  proxy remoto /<ID>/ ◀─▶ tunnel MQTT │
+                         └──────────────────── volume /data ───────────────────┘
 ```
+
+Su internet basta una porta: la **443**. Il container smista le connessioni TLS in base all'ALPN
+dichiarato dal client, senza decifrarle (vedi [Porta unica](#porta-unica-443)). Le porte separate
+8883/8884 restano disponibili per gli in-out non ancora aggiornati.
 
 ## Avvio
 
-Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80**, **443**, **8883** e **8884** aperte.
+Requisiti: una VPS con Docker, un nome DNS (es. `mqtt.tuodominio.it`) che punta alla VPS, porte **80** e **443** aperte (più **8883** e **8884** finché ci sono in-out non aggiornati alla porta unica).
 
 ```bash
 cp .env.example .env
@@ -39,6 +44,35 @@ docker compose up -d --build
 Al primo avvio vengono creati automaticamente la CA, il certificato del server (per `BROKER_HOST`) e la configurazione di Mosquitto. Il pannello è su `https://BROKER_HOST` (certificato Let's Encrypt gestito da Caddy).
 
 > Se hai già un reverse proxy, togli il servizio `caddy` dal compose e pubblica la porta 8080 del servizio `broker` solo verso il proxy. Senza HTTPS imposta `SESSION_HTTPS_ONLY=0`.
+
+## Porta unica (443)
+
+Con `docker-compose.yml` la 443 pubblica è del container `broker` (`app/mux.py`). Per ogni
+connessione legge dal ClientHello TLS solo l'**ALPN** e la inoltra così com'è:
+
+| ALPN offerto dal client | Destinazione | TLS |
+|---|---|---|
+| `mqtt` | Mosquitto (8883 interna) | mTLS con il certificato client, CRL: invariato |
+| `baronpesi-enroll` | registrazione (8884 interna) | certificato della CA interna: invariato |
+| altro (browser: `h2`, `http/1.1`; ACME) | Caddy, con PROXY protocol v2 | Let's Encrypt |
+
+Il TLS non viene terminato dal mux, quindi certificati client, revoche e sospensioni funzionano
+come sulle porte separate. L'IP reale del client resta visibile ovunque: verso Caddy viaggia nel
+PROXY protocol; per Mosquitto e la registrazione il mux annota nel DB *porta locale → IP* prima di
+collegarsi, e pannello e registrazione lo recuperano (eventi, `last_ip`, limite di richieste).
+
+Cosa cambia negli in-out:
+
+- porta MQTT e porta di registrazione: `443`;
+- connessione MQTT con ALPN `mqtt` (paho: `ctx.set_alpn_protocols(["mqtt"])` e `client.tls_set_context(ctx)`);
+- tutte le richieste di registrazione (`/ca.crt`, `/enroll`, `/crl.pem`) con ALPN `baronpesi-enroll`
+  (`ssl.SSLContext.set_alpn_protocols(["baronpesi-enroll"])`, anche per il primo download della CA).
+
+Senza ALPN una connessione sulla 443 arriva al pannello. Se la registrazione è arrivata dalla porta
+unica, la risposta di `/enroll` contiene `"mqtt_port": 443` e `"mqtt_alpn": "mqtt"`.
+
+Quando tutti gli in-out sono aggiornati, togli le righe `8883` e `8884` dai `ports` del compose.
+In rete locale (`docker-compose.lan.yml`) la porta unica non è attiva (`MUX_ENABLED=0`).
 
 ## Avvio in rete locale (senza dominio)
 
@@ -61,7 +95,7 @@ Pannello e accesso remoto agli in-out: `http://192.168.1.50:8080`. Negli in-out:
 Sull'in-out, nella pagina **Broker MQTT**, imposta solo:
 
 - Host: `BROKER_HOST` (lo stesso nome o IP presente nel certificato del server)
-- Porta MQTT: `8883`, porta registrazione: `8884`
+- Porta MQTT: `443`, porta registrazione: `443`, con ALPN (vedi [Porta unica](#porta-unica-443)). In-out non aggiornati o in rete locale: `8883` e `8884`
 
 Al salvataggio l'in-out:
 
@@ -154,7 +188,12 @@ Il pannello si iscrive a `#` con sessione persistente e QoS 1: se il pannello è
 | Variabile | Default | Descrizione |
 |---|---|---|
 | `BROKER_HOST` | — | Nome DNS del broker: va nel certificato del server e nel campo Host degli in-out |
-| `BROKER_PUBLIC_PORT` | `8883` | Porta MQTT/TLS pubblicata |
+| `MUX_PUBLIC_PORT` | `443` | Porta unica pubblicata (in-out e pannello, smistati per ALPN) |
+| `MUX_ENABLED` | `0` (`1` in `docker-compose.yml`) | Porta unica attiva |
+| `MUX_WEB_UPSTREAM` | `caddy:443` | Dove inoltrare il traffico dei browser |
+| `MUX_WEB_PROXY_PROTOCOL` | `1` | Invia l'IP del client a `MUX_WEB_UPSTREAM` con il PROXY protocol v2 |
+| `MUX_MAX_CONNECTIONS` | `2000` | Connessioni contemporanee massime sulla porta unica |
+| `BROKER_PUBLIC_PORT` | `8883` | Porta MQTT/TLS separata pubblicata |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / — | Accesso al pannello |
 | `SESSION_HTTPS_ONLY` | `1` | Cookie di sessione solo su HTTPS |
 | `RETENTION_DAYS` | `90` | Giorni di conservazione di messaggi ed eventi (`0` = per sempre) |
@@ -201,6 +240,7 @@ app/
   broker.py    mosquitto.conf, ACL, ricarica, scollegamento, lettura del log (stato online)
   ingest.py    subscriber MQTT interno che archivia i messaggi, pulizia dello storico
   enroll.py    servizio HTTPS di registrazione automatica degli in-out (porta 8884)
+  mux.py       porta unica 443: smista per ALPN tra Mosquitto, registrazione e Caddy
   gateway.py   porta unica 8080: smista tra pannello e accesso remoto
   remote.py    accesso remoto agli in-out su /<ID>/: proxy HTTP/websocket attraverso MQTT
   tunnel.py    protocollo del tunnel su MQTT (<ID>/tunnel/req e <ID>/tunnel/res)
@@ -208,5 +248,5 @@ app/
   ssh_sessions.py  registrazioni delle sessioni del terminale
   static/xterm/  xterm.js 5.5.0 e addon-fit 0.10.0 (licenza MIT) per la pagina del terminale
   db.py        schema SQLite
-docker/        entrypoint e supervisord (Mosquitto, pannello e registrazione nello stesso container)
+docker/        entrypoint e supervisord (Mosquitto, pannello, registrazione e porta unica nello stesso container)
 ```

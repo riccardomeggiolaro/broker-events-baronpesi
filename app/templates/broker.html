@@ -11,7 +11,13 @@
     <h2>Connessione per gli in-out</h2>
     <dl class="kv">
       <dt>Host</dt><dd class="mono">{{ broker_host }}</dd>
+      {% if mux_port %}
+      <dt>Porta unica</dt><dd><span class="mono">{{ mux_port }}</span> · MQTT con ALPN <code>{{ alpn_mqtt }}</code>,
+        registrazione con ALPN <code>{{ alpn_enroll }}</code>, pannello dal browser</dd>
+      <dt>Porte separate</dt><dd class="mono">{{ broker_port }} (MQTT su TLS 1.2+)</dd>
+      {% else %}
       <dt>Porta</dt><dd class="mono">{{ broker_port }} (MQTT su TLS 1.2+)</dd>
+      {% endif %}
       <dt>Autenticazione</dt><dd>solo certificato client firmato da questa CA</dd>
       <dt>Topic</dt><dd>ogni dispositivo scrive solo su <code>&lt;ID&gt;</code> e <code>&lt;ID&gt;/#</code></dd>
       <dt>Messaggio massimo</dt><dd>{{ max_message_mb }} MB</dd>
