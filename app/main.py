@@ -158,6 +158,10 @@ templates.env.globals["static_v"] = hashlib.sha256(
     b"".join(f.read_bytes() for f in sorted((BASE / "static").glob("*")) if f.is_file())
 ).hexdigest()[:10]
 templates.env.globals["broker_port"] = config.BROKER_PUBLIC_PORT
+# Porta unica (app/mux.py): 0 se disattivata
+templates.env.globals["mux_port"] = config.MUX_PUBLIC_PORT if config.MUX_ENABLED else 0
+templates.env.globals["alpn_mqtt"] = config.ALPN_MQTT
+templates.env.globals["alpn_enroll"] = config.ALPN_ENROLL
 templates.env.globals["retention_days"] = config.RETENTION_DAYS
 templates.env.globals["max_message_mb"] = config.MAX_MESSAGE_MB
 

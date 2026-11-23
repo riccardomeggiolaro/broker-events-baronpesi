@@ -1,4 +1,4 @@
-"""Registrazione automatica degli in-out (HTTPS, porta 8884).
+"""Registrazione automatica degli in-out (HTTPS, porta 8884 o porta unica con ALPN "baronpesi-enroll").
 
 Un in-out senza certificato genera da solo la sua chiave privata (che non lascia
 mai il dispositivo) e invia una richiesta CSR con il proprio client ID. Il
@@ -65,7 +65,10 @@ def _error(status: int, code: str, detail: str) -> JSONResponse:
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "?"
+    if not request.client:
+        return "?"
+    # Dalla porta unica la connessione arriva da 127.0.0.1: IP reale annotato dal mux
+    return db.real_ip(request.client.host, request.client.port)
 
 
 def _rate_limited(ip: str) -> bool:
@@ -191,5 +194,13 @@ def enroll(body: EnrollRequest, request: Request):
         "not_after": cert.not_valid_after_utc.isoformat(timespec="seconds"),
         "certificate": cert.public_bytes(serialization.Encoding.PEM).decode(),
         "ca": pki.CA_CRT.read_text(),
-        "mqtt_port": config.BROKER_PUBLIC_PORT,
+        **_mqtt_endpoint(request),
     }
+
+
+def _mqtt_endpoint(request: Request) -> dict:
+    """Dove collegarsi via MQTT: sulla porta unica (con ALPN) se la registrazione è arrivata da lì."""
+    via_mux = request.client is not None and request.client.host in db.LOOPBACK and config.MUX_ENABLED
+    if via_mux:
+        return {"mqtt_port": config.MUX_PUBLIC_PORT, "mqtt_alpn": config.ALPN_MQTT}
+    return {"mqtt_port": config.BROKER_PUBLIC_PORT}

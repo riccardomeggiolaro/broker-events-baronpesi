@@ -1,6 +1,7 @@
 """Database SQLite: dispositivi, certificati, messaggi, allegati, eventi di connessione."""
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -64,6 +65,15 @@ CREATE TABLE IF NOT EXISTS events (
     detail      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_evt_device ON events(device_id, ts);
+
+-- Connessioni inoltrate dalla porta unica (app/mux.py): porta locale verso
+-- Mosquitto/registrazione -> IP reale del client
+CREATE TABLE IF NOT EXISTS mux_conns (
+    local_port  INTEGER NOT NULL,
+    ts          REAL NOT NULL,              -- epoch
+    ip          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_mux_port ON mux_conns(local_port, ts);
 
 CREATE TABLE IF NOT EXISTS kv (
     key   TEXT PRIMARY KEY,
@@ -141,6 +151,35 @@ def kv_set(key: str, value) -> None:
         "INSERT INTO kv(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, None if value is None else str(value)),
     )
+
+
+LOOPBACK = {"127.0.0.1", "::1", "::ffff:127.0.0.1"}
+
+
+def mux_record(local_port: int, ip: str) -> None:
+    conn().execute("INSERT INTO mux_conns(local_port, ts, ip) VALUES(?, ?, ?)", (local_port, time.time(), ip))
+
+
+def mux_prune(max_age: float = 2 * 86400) -> None:
+    conn().execute("DELETE FROM mux_conns WHERE ts < ?", (time.time() - max_age,))
+
+
+def real_ip(ip: str, port: int | None, at: float | None = None, window: float = 5.0) -> str:
+    """IP reale di una connessione arrivata dalla porta unica (sorgente locale `ip:port`).
+
+    `at`: istante della connessione (per righe di log lette in ritardo); senza,
+    vale l'ultima connessione registrata su quella porta (connessione ancora aperta).
+    Le connessioni che non passano dalla porta unica restano invariate."""
+    if ip not in LOOPBACK or not port:
+        return ip
+    if at is None:
+        row = q1("SELECT ip FROM mux_conns WHERE local_port=? ORDER BY ts DESC LIMIT 1", port)
+    else:
+        row = q1(
+            "SELECT ip FROM mux_conns WHERE local_port=? AND ts BETWEEN ? AND ? ORDER BY ts DESC LIMIT 1",
+            port, at - window, at + window,
+        )
+    return row["ip"] if row else ip
 
 
 def add_event(kind: str, device_id: str | None, detail: str = "", ts: str | None = None) -> None:

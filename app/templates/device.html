@@ -15,7 +15,7 @@
   <section class="card" data-live="connection">
     <h2>Connessione</h2>
     <dl class="kv">
-      <dt>Broker</dt><dd class="mono">{{ broker_host }}:{{ broker_port }} (TLS)</dd>
+      <dt>Broker</dt><dd class="mono">{% if mux_port %}{{ broker_host }}:{{ mux_port }} (TLS, ALPN {{ alpn_mqtt }}) · {% endif %}{{ broker_host }}:{{ broker_port }} (TLS)</dd>
       <dt>Client ID / topic</dt><dd class="mono">{{ device.id }}</dd>
       <dt>Autenticazione</dt><dd>certificato client (username e password vuoti)</dd>
       <dt>Stato</dt><dd>{% if online %}collegato da {{ online.ip }} dalle {{ online.since|dt }}{% else %}non collegato · ultimo accesso {{ device.last_seen_at|ago }}{% endif %}</dd>

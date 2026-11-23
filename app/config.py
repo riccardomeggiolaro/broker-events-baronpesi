@@ -46,6 +46,24 @@ ENROLL_INTERNAL_PORT = 8884
 # Porta pubblicata (solo informativa, il servizio ascolta sempre su 8884)
 ENROLL_PUBLIC_PORT = _int("ENROLL_PUBLIC_PORT", 8884)
 
+# Porta unica (app/mux.py): un solo ingresso TLS per in-out e pannello. Il traffico
+# viene smistato in base all'ALPN dichiarato dal client, senza decifrarlo:
+#   "mqtt"              -> Mosquitto (8883), mTLS invariato
+#   "baronpesi-enroll"  -> registrazione (8884), CA interna invariata
+#   altro (browser)     -> pannello via Caddy (Let's Encrypt), con PROXY protocol
+# L'IP reale degli in-out viene annotato nel DB (porta locale -> IP) e recuperato
+# da log di Mosquitto e registrazione.
+MUX_ENABLED = os.environ.get("MUX_ENABLED", "0") == "1"
+MUX_INTERNAL_PORT = _int("MUX_INTERNAL_PORT", 8443)
+# Porta pubblicata (solo informativa)
+MUX_PUBLIC_PORT = _int("MUX_PUBLIC_PORT", 443)
+# Destinazione del traffico web (host:porta) e uso del PROXY protocol v2 verso di essa
+MUX_WEB_UPSTREAM = os.environ.get("MUX_WEB_UPSTREAM", "caddy:443").strip()
+MUX_WEB_PROXY_PROTOCOL = os.environ.get("MUX_WEB_PROXY_PROTOCOL", "1") == "1"
+MUX_MAX_CONNECTIONS = _int("MUX_MAX_CONNECTIONS", 2000)
+ALPN_MQTT = "mqtt"
+ALPN_ENROLL = "baronpesi-enroll"
+
 # Identità interna del pannello (legge tutti i topic). I dispositivi non
 # possono avere un ID che inizia con "_".
 MONITOR_ID = "__monitor__"

@@ -1,6 +1,25 @@
 # HTTPS automatico (Let's Encrypt) per il pannello sul dominio del broker.
 # Sulla stessa porta c'è anche l'accesso remoto agli in-out (https://BROKER_HOST/<ID>/).
 # Il DNS di BROKER_HOST deve puntare a questo server e le porte 80/443 devono essere aperte.
+#
+# La 443 pubblica è la porta unica del container broker (app/mux.py), che inoltra qui
+# il traffico dei browser aggiungendo l'IP reale del client con il PROXY protocol v2.
+{
+	servers :443 {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				# Solo la rete Docker interna può dichiarare l'IP del client
+				allow 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+				fallback_policy reject
+			}
+			tls
+		}
+		# Niente HTTP/3: la porta unica inoltra solo TCP
+		protocols h1 h2
+	}
+}
+
 {$BROKER_HOST} {
 	encode gzip
 	reverse_proxy broker:8080

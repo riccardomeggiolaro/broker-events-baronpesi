@@ -1,6 +1,12 @@
-# Broker MQTT per gli in-out + pannello di gestione.
+# Broker MQTT per gli in-out + pannello di gestione, su un'unica porta pubblica (443).
 #   cp .env.example .env   (imposta BROKER_HOST e ADMIN_PASSWORD)
 #   docker compose up -d --build
+#
+# Sulla 443 il container "broker" smista le connessioni TLS in base all'ALPN (app/mux.py):
+#   ALPN "mqtt"             -> Mosquitto (mTLS con certificato client)
+#   ALPN "baronpesi-enroll" -> registrazione automatica degli in-out
+#   altro (browser)         -> Caddy (Let's Encrypt) -> pannello e accesso remoto agli in-out
+# La 80 serve solo a Caddy per il certificato Let's Encrypt e il redirect a HTTPS.
 services:
   broker:
     build: .
@@ -8,11 +14,17 @@ services:
     container_name: mqtt-broker
     restart: unless-stopped
     env_file: .env
+    environment:
+      MUX_ENABLED: "1"
+      MUX_WEB_UPSTREAM: "caddy:443"
     ports:
-      - "${BROKER_PUBLIC_PORT:-8883}:8883"   # MQTT su TLS, raggiungibile dagli in-out
-      - "${ENROLL_PUBLIC_PORT:-8884}:8884"   # registrazione automatica degli in-out (HTTPS)
+      - "${MUX_PUBLIC_PORT:-443}:8443"       # porta unica: in-out (MQTT + registrazione) e pannello
+      # Porte separate per gli in-out non ancora aggiornati alla porta unica.
+      # Toglile quando tutti gli in-out usano la 443 con ALPN.
+      - "${BROKER_PUBLIC_PORT:-8883}:8883"   # MQTT su TLS
+      - "${ENROLL_PUBLIC_PORT:-8884}:8884"   # registrazione automatica (HTTPS)
     expose:
-      - "8080"                               # pannello + accesso remoto agli in-out: pubblicato solo tramite Caddy
+      - "8080"                               # pannello: raggiunto solo da Caddy
     volumes:
       - broker_data:/data
     logging:
@@ -26,8 +38,9 @@ services:
     environment:
       BROKER_HOST: ${BROKER_HOST}
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80"                              # ACME HTTP-01 e redirect a HTTPS
+    expose:
+      - "443"                                # HTTPS: raggiunto solo dalla porta unica del broker
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
